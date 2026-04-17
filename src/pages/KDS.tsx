@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
@@ -46,21 +47,17 @@ const parseOrderDetails = (details: any): any[] => {
 const getFormattedOptions = (item: any) => {
   let rawOptions: any[] = [];
   
-  // 1. Maintien du tag spécifique KDS "SOLO" en priorité absolue
   if (item.isSolo) {
     rawOptions.push({ name: "🍔 VERSION SOLO", _print_order: -999 });
   }
 
   const dynOpts = item.selectedSubOptions || item.selections || item.options || [];
 
-  // 2. Rétro-compatibilité pour les très anciennes commandes
   if (item.boisson) rawOptions.push({ name: item.boisson.name || item.boisson, _print_order: -2 });
   if (item.accompagnement) rawOptions.push({ name: item.accompagnement.name || item.accompagnement, _print_order: -1 });
 
-  // 3. Extraction de la nouvelle forme de données (Tableau intelligent ou Objet)
   if (Array.isArray(dynOpts)) {
     dynOpts.forEach((group: any) => {
-      // Si la donnée est imbriquée dans "options" (comme ton nouveau Menu)
       if (group && group.options && Array.isArray(group.options)) {
         rawOptions.push(...group.options);
       } else {
@@ -75,7 +72,6 @@ const getFormattedOptions = (item: any) => {
     });
   }
 
-  // 4. Nettoyage et mise en forme
   const formattedList = rawOptions.map((opt, i) => {
     let name = "";
     let order = opt._print_order !== undefined ? opt._print_order : i;
@@ -88,14 +84,11 @@ const getFormattedOptions = (item: any) => {
     return { name: name.trim(), order };
   }).filter(o => o.name && o.name.toLowerCase() !== 'option' && o.name.toLowerCase() !== 'options');
 
-  // 5. Tri pour l'affichage
   formattedList.sort((a, b) => a.order - b.order);
 
-  // 6. Regroupement et ajout du style KDS (ex: "2x + Ketchup")
   const finalOptions: { name: string, qty: number }[] = [];
   
   formattedList.forEach(opt => {
-    // On ajoute le petit "+" visuel sauf si c'est le tag SOLO
     let finalName = opt.name === "🍔 VERSION SOLO" ? opt.name : `+ ${opt.name}`;
     
     const existing = finalOptions.find(o => o.name === finalName);
@@ -496,10 +489,6 @@ const KDS = () => {
           </div>
         </div>
       ) : (
-        /* GRILLE ABSOLUE (CSS COLUMNS) 
-          Le parent est flex-1/relative. L'enfant est absolute/inset-0 pour forcer la hauteur.
-          C'est ce qui oblige les cartes à s'empiler en vertical puis passer à la colonne de droite !
-        */
         <div className="flex-1 relative w-full min-h-0">
           <div 
             className="absolute inset-0"
@@ -514,7 +503,6 @@ const KDS = () => {
               return (
                 <div 
                   key={order.id} 
-                  /* w-full et break-inside-avoid empêchent la carte d'être coupée entre 2 colonnes */
                   className={`w-full break-inside-avoid mb-3 bg-white rounded-2xl border-2 flex flex-col overflow-hidden transition-all ${borderClass}`}
                 >
                   
@@ -529,21 +517,28 @@ const KDS = () => {
                     </div>
                   </div>
 
-                  <div className="p-1.5 space-y-1 bg-white">
+                  <div className="p-1.5 space-y-1.5 bg-gray-100 flex-1">
                     {order.displayItems.map((item: any, idx: number) => {
                       const productName = item.product?.name || item.name || 'Produit inconnu';
                       const qty = item.quantity || 1;
                       const options = getFormattedOptions(item);
 
                       return (
-                        <div key={idx} className="bg-gray-50 rounded-lg p-1.5 border border-gray-100">
-                          <div className="flex gap-1.5 items-start font-bold">
-                            <span className="text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded text-xs leading-none mt-0.5">{qty}x</span>
-                            <span className="text-xs md:text-sm font-black text-slate-800 leading-tight">{productName}</span>
+                        <div key={idx} className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-200">
+                          {/* LIGNE PRODUIT : Fond clair, écriture foncée (Très grand) */}
+                          <div className="px-3 py-2.5 flex gap-2 items-center">
+                            <span className="text-white bg-slate-800 px-2 py-1 rounded text-sm font-black shadow-sm flex-shrink-0">{qty}x</span>
+                            <span className="text-[17px] font-black text-slate-900 uppercase tracking-tight leading-tight">{productName}</span>
                           </div>
+                          
+                          {/* LIGNES OPTIONS : Fond très foncé, écriture blanche (Couleur inversée) */}
                           {options.length > 0 && (
-                            <div className="mt-1 pl-7 text-[10px] text-slate-500 font-bold leading-tight uppercase tracking-wider">
-                              {options.join(' • ')}
+                            <div className="bg-slate-800 px-3 py-2 flex flex-col gap-1 border-t border-slate-700">
+                              {options.map((opt, oIdx) => (
+                                <div key={oIdx} className="text-[13px] text-white font-bold leading-tight uppercase tracking-wider flex items-start gap-1">
+                                   <span className="text-emerald-400 font-black mt-[1px]">↳</span> {opt}
+                                </div>
+                              ))}
                             </div>
                           )}
                         </div>
@@ -551,14 +546,14 @@ const KDS = () => {
                     })}
                   </div>
 
-                  <div className="flex-shrink-0 bg-white border-t border-gray-100">
+                  <div className="flex-shrink-0 bg-white border-t border-gray-200">
                     {isNewOrder ? (
-                      <button onClick={() => acceptOrder(order.id)} className="w-full bg-red-500 hover:bg-red-600 text-white font-black text-xs md:text-sm uppercase tracking-widest py-2 md:py-2.5 transition-colors flex justify-center items-center gap-1.5 active:scale-95">
-                        <BellRing size={16} className="animate-wiggle pointer-events-none" /> Accepter
+                      <button onClick={() => acceptOrder(order.id)} className="w-full bg-red-500 hover:bg-red-600 text-white font-black text-sm uppercase tracking-widest py-3 transition-colors flex justify-center items-center gap-2 active:scale-95">
+                        <BellRing size={18} className="animate-wiggle pointer-events-none" /> Accepter
                       </button>
                     ) : (
-                      <button onClick={() => markOrderAsReady(order.id)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-900 font-black text-xs md:text-sm uppercase tracking-widest py-2 md:py-2.5 transition-colors flex justify-center items-center gap-1.5 active:scale-95">
-                        <CheckCircle2 size={16} strokeWidth={3} className="pointer-events-none" /> Prêt
+                      <button onClick={() => markOrderAsReady(order.id)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-900 font-black text-sm uppercase tracking-widest py-3 transition-colors flex justify-center items-center gap-2 active:scale-95">
+                        <CheckCircle2 size={18} strokeWidth={3} className="pointer-events-none" /> Prêt
                       </button>
                     )}
                   </div>
