@@ -43,9 +43,9 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: 'Detroit Borne',
-        short_name: 'Detroit',
-        description: 'Borne de commande Detroit DBHD',
+        name: 'KDS Borne',
+        short_name: 'KDS',
+        description: 'Borne de commande KDS DBHD',
         theme_color: '#E2E8F0',
         icons: [
           {

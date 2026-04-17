@@ -489,23 +489,40 @@ const KDS = () => {
           </div>
         </div>
       ) : (
-        <div className="flex-1 relative w-full min-h-0">
-          <div 
-            className="absolute inset-0"
-            style={{ columnCount: 5, columnGap: '12px', columnFill: 'auto' }}
-          >
+        /* MODIFICATION MAJEURE ICI : La Grille Intelligente (CSS Grid) */
+        <div className="flex-1 relative w-full min-h-0 overflow-y-auto custom-scrollbar">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 p-1 pb-10 content-start auto-rows-max items-start">
+            
             {visibleOrders.map((order) => {
               const status = order.status?.toLowerCase() || '';
               const isNewOrder = status === 'nouvelle';
+              const itemCount = order.displayItems.length;
+
+              // --- LOGIQUE D'ÉLARGISSEMENT DYNAMIQUE ---
+              let colSpanClass = "col-span-1";
+              let innerGridClass = "grid-cols-1";
+
+              if (itemCount > 14) {
+                // Ticket très long = prend 3 colonnes de largeur
+                colSpanClass = "md:col-span-3";
+                innerGridClass = "md:grid-cols-3";
+              } else if (itemCount > 7) {
+                // Ticket moyen-long = prend 2 colonnes de largeur
+                colSpanClass = "md:col-span-2";
+                innerGridClass = "md:grid-cols-2";
+              }
+
               let headerBgClass = isNewOrder ? 'bg-red-500' : 'bg-amber-600'; 
               let borderClass = isNewOrder ? 'border-[3px] border-red-500 animate-alert' : 'border-amber-600 shadow-md';
 
               return (
                 <div 
                   key={order.id} 
-                  className={`w-full break-inside-avoid mb-3 bg-white rounded-2xl border-2 flex flex-col overflow-hidden transition-all ${borderClass}`}
+                  // La carte applique dynamiquement le col-span pour s'élargir
+                  className={`w-full bg-white rounded-2xl border-2 flex flex-col overflow-hidden transition-all shadow-md ${borderClass} ${colSpanClass}`}
                 >
                   
+                  {/* EN TÊTE DU TICKET */}
                   <div className={`${headerBgClass} p-2 flex justify-between items-center border-b border-black/10 flex-shrink-0`}>
                     <div className="flex items-center gap-1.5">
                       {isNewOrder && <BellRing size={16} className="text-white animate-bounce" />}
@@ -517,21 +534,20 @@ const KDS = () => {
                     </div>
                   </div>
 
-                  <div className="p-1.5 space-y-1.5 bg-gray-100 flex-1">
+                  {/* CORPS DU TICKET : C'est ici que les produits s'étalent en colonnes si le ticket est large */}
+                  <div className={`p-1.5 bg-gray-100 flex-1 grid ${innerGridClass} gap-1.5 content-start`}>
                     {order.displayItems.map((item: any, idx: number) => {
                       const productName = item.product?.name || item.name || 'Produit inconnu';
                       const qty = item.quantity || 1;
                       const options = getFormattedOptions(item);
 
                       return (
-                        <div key={idx} className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-200">
-                          {/* LIGNE PRODUIT : Fond clair, écriture foncée (Très grand) */}
+                        <div key={idx} className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-200 h-max">
                           <div className="px-3 py-2.5 flex gap-2 items-center">
                             <span className="text-white bg-slate-800 px-2 py-1 rounded text-sm font-black shadow-sm flex-shrink-0">{qty}x</span>
                             <span className="text-[17px] font-black text-slate-900 uppercase tracking-tight leading-tight">{productName}</span>
                           </div>
                           
-                          {/* LIGNES OPTIONS : Fond très foncé, écriture blanche (Couleur inversée) */}
                           {options.length > 0 && (
                             <div className="bg-slate-800 px-3 py-2 flex flex-col gap-1 border-t border-slate-700">
                               {options.map((opt, oIdx) => (
@@ -546,6 +562,7 @@ const KDS = () => {
                     })}
                   </div>
 
+                  {/* PIED DE TICKET AVEC BOUTON D'ACTION */}
                   <div className="flex-shrink-0 bg-white border-t border-gray-200">
                     {isNewOrder ? (
                       <button onClick={() => acceptOrder(order.id)} className="w-full bg-red-500 hover:bg-red-600 text-white font-black text-sm uppercase tracking-widest py-3 transition-colors flex justify-center items-center gap-2 active:scale-95">

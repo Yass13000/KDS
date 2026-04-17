@@ -1,7 +1,7 @@
 {
-  "name": "Detroit - Commande en ligne",
-  "short_name": "Detroit",
-  "description": "Application Detroit - commande en ligne de vos produits préférés",
+  "name": "KDS - Commande en ligne",
+  "short_name": "KDS",
+  "description": "Application KDS - commande en ligne de vos produits préférés",
   "start_url": "/",
   "scope": "/",
   "display": "fullscreen",
