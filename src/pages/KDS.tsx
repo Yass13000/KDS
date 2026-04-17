@@ -44,24 +44,69 @@ const parseOrderDetails = (details: any): any[] => {
 };
 
 const getFormattedOptions = (item: any) => {
-  const opts: string[] = [];
+  let rawOptions: any[] = [];
+  
+  // 1. Maintien du tag spécifique KDS "SOLO" en priorité absolue
+  if (item.isSolo) {
+    rawOptions.push({ name: "🍔 VERSION SOLO", _print_order: -999 });
+  }
 
-  if (item.isSolo) opts.push("🍔 VERSION SOLO");
+  const dynOpts = item.selectedSubOptions || item.selections || item.options || [];
 
-  if (item.selectedSubOptions && Array.isArray(item.selectedSubOptions)) {
-    item.selectedSubOptions.forEach((group: any) => {
-      if (group.options && Array.isArray(group.options)) {
-        group.options.forEach((opt: any) => {
-          if (opt && opt.name) opts.push(`+ ${opt.name}`);
-        });
+  // 2. Rétro-compatibilité pour les très anciennes commandes
+  if (item.boisson) rawOptions.push({ name: item.boisson.name || item.boisson, _print_order: -2 });
+  if (item.accompagnement) rawOptions.push({ name: item.accompagnement.name || item.accompagnement, _print_order: -1 });
+
+  // 3. Extraction de la nouvelle forme de données (Tableau intelligent ou Objet)
+  if (Array.isArray(dynOpts)) {
+    dynOpts.forEach((group: any) => {
+      // Si la donnée est imbriquée dans "options" (comme ton nouveau Menu)
+      if (group && group.options && Array.isArray(group.options)) {
+        rawOptions.push(...group.options);
+      } else {
+        rawOptions.push(group);
       }
+    });
+  } else if (typeof dynOpts === 'object' && dynOpts !== null) {
+    Object.keys(dynOpts).forEach(k => {
+      const val = dynOpts[k];
+      if (Array.isArray(val)) rawOptions.push(...val);
+      else rawOptions.push(val);
     });
   }
 
-  const grouped: Record<string, number> = {};
-  opts.forEach(opt => { grouped[opt] = (grouped[opt] || 0) + 1; });
+  // 4. Nettoyage et mise en forme
+  const formattedList = rawOptions.map((opt, i) => {
+    let name = "";
+    let order = opt._print_order !== undefined ? opt._print_order : i;
 
-  return Object.entries(grouped).map(([name, count]) => count > 1 ? `${count}x ${name}` : name);
+    if (typeof opt === 'string') {
+      name = opt;
+    } else {
+      name = opt.name || opt.title || opt.variant_name || opt.value || "";
+    }
+    return { name: name.trim(), order };
+  }).filter(o => o.name && o.name.toLowerCase() !== 'option' && o.name.toLowerCase() !== 'options');
+
+  // 5. Tri pour l'affichage
+  formattedList.sort((a, b) => a.order - b.order);
+
+  // 6. Regroupement et ajout du style KDS (ex: "2x + Ketchup")
+  const finalOptions: { name: string, qty: number }[] = [];
+  
+  formattedList.forEach(opt => {
+    // On ajoute le petit "+" visuel sauf si c'est le tag SOLO
+    let finalName = opt.name === "🍔 VERSION SOLO" ? opt.name : `+ ${opt.name}`;
+    
+    const existing = finalOptions.find(o => o.name === finalName);
+    if (existing) {
+      existing.qty += 1;
+    } else {
+      finalOptions.push({ name: finalName, qty: 1 });
+    }
+  });
+
+  return finalOptions.map(o => o.qty > 1 ? `${o.qty}x ${o.name}` : o.name);
 };
 
 const isActiveForKDS = (status: string) => {
