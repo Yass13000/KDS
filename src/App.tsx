@@ -1,25 +1,21 @@
 import { useEffect, lazy, Suspense } from 'react';
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { CartProvider } from "@/context/CartContext";
-import { ConfigProvider } from "@/context/ConfigContext";
-import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { Toaster } from 'sonner'; // Import direct au lieu du dossier UI
 
 import { StatusBar } from '@capacitor/status-bar';
 import { Capacitor } from '@capacitor/core';
 
-// --- IMPORTS DES PAGES ---
-const Caisse = lazy(() => import("./pages/Caisse"));
-const NotFound = lazy(() => import("./pages/NotFound"));
+// --- IMPORT UNIQUE DE LA PAGE ---
+const KDS = lazy(() => import("./pages/KDS"));
 
 const PageLoader = () => (
-  <div className="flex-1 w-full flex items-center justify-center bg-background">
+  <div className="flex-1 h-screen w-full flex items-center justify-center bg-[#0f172a]">
     <div className="text-center">
-      <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-secondary"></div>
-      <p className="mt-4 text-lg text-secondary font-helvetica font-bold tracking-widest uppercase">Chargement...</p>
+      <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-400"></div>
+      <p className="mt-4 text-lg text-emerald-400 font-helvetica font-bold tracking-widest uppercase">
+        Chargement Cuisine...
+      </p>
     </div>
   </div>
 );
@@ -42,40 +38,31 @@ const App = () => {
   }, []);
 
   return (
-    <ErrorBoundary>
-      <ConfigProvider>
-        <QueryClientProvider client={queryClient}>
-          <CartProvider>
-            <TooltipProvider>
-              
-              <main className="min-h-screen w-full flex flex-col bg-background relative overflow-x-hidden font-helvetica select-none">
-                <Toaster />
-                <Sonner position="top-center" />
+    <QueryClientProvider client={queryClient}>
+      <main className="min-h-screen w-full flex flex-col bg-[#0f172a] relative overflow-x-hidden font-helvetica select-none">
+        
+        {/* Notifications (Toaster) en thème sombre */}
+        <Toaster position="top-center" richColors theme="dark" />
+        
+        <div className="flex-1 flex flex-col w-full relative">
+          <BrowserRouter>
+            <Suspense fallback={<PageLoader />}>
+              <Routes>
+                {/* Redirection vers le KDS */}
+                <Route path="/" element={<Navigate to="/kds" replace />} />
                 
-                <div className="flex-1 flex flex-col w-full relative">
-                  <BrowserRouter>
-                    <Suspense fallback={<PageLoader />}>
-                      <Routes>
-                        {/* Redirection par défaut vers la caisse */}
-                        <Route path="/" element={<Navigate to="/caisse" replace />} />
-                        
-                        {/* Route principale de la caisse */}
-                        <Route path="/caisse" element={<Caisse />} />
-                        
-                        {/* Page 404 */}
-                        <Route path="*" element={<NotFound />} />
-                      </Routes>
-                    </Suspense>
-                  </BrowserRouter>
-                </div>
+                {/* Route principale */}
+                <Route path="/kds" element={<KDS />} />
                 
-              </main>
-
-            </TooltipProvider>
-          </CartProvider>
-        </QueryClientProvider>
-      </ConfigProvider>
-    </ErrorBoundary>
+                {/* Si on tape n'importe quoi (anciennement 404), on force le KDS */}
+                <Route path="*" element={<Navigate to="/kds" replace />} />
+              </Routes>
+            </Suspense>
+          </BrowserRouter>
+        </div>
+        
+      </main>
+    </QueryClientProvider>
   );
 };
 
