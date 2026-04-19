@@ -270,7 +270,7 @@ const KDS = () => {
         } else if (payload.eventType === 'UPDATE') {
           setOrders(prev => {
             const exists = prev.find(o => o.id === payload.new.id);
-            if (exists) return prev.map(o => o.id === payload.new.id ? payload.new : o);
+            if (exists) return prev.map(o => o.id === payload.new.id ? { ...o, ...payload.new } : o);
             return [...prev, payload.new];
           });
           const oldStatus = payload.old?.status?.toLowerCase();
@@ -418,6 +418,13 @@ const KDS = () => {
           .animate-alert { animation: alert-blink 0.8s ease-in-out infinite; }
           .slide-in-right { animation: slideIn 0.3s forwards cubic-bezier(0.16, 1, 0.3, 1); }
           @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+          
+          /* SCROLLBAR PERSONNALISÉE POUR LES CARTES */
+          .ticket-scrollbar::-webkit-scrollbar { width: 8px; }
+          .ticket-scrollbar::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.05); border-radius: 4px; }
+          .ticket-scrollbar::-webkit-scrollbar-thumb { background: rgba(15, 23, 42, 0.3); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
+          .ticket-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(15, 23, 42, 0.5); border: 2px solid transparent; background-clip: padding-box; }
+          
           .custom-scrollbar::-webkit-scrollbar { width: 6px; }
           .custom-scrollbar::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); border-radius: 4px; }
           .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(200, 200, 200, 0.3); border-radius: 4px; }
@@ -489,7 +496,6 @@ const KDS = () => {
           </div>
         </div>
       ) : (
-        /* MODIFICATION MAJEURE ICI : La Grille Intelligente (CSS Grid) */
         <div className="flex-1 relative w-full min-h-0 overflow-y-auto custom-scrollbar">
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3 p-1 pb-10 content-start auto-rows-max items-start">
             
@@ -518,7 +524,6 @@ const KDS = () => {
               return (
                 <div 
                   key={order.id} 
-                  // La carte applique dynamiquement le col-span pour s'élargir
                   className={`w-full bg-white rounded-2xl border-2 flex flex-col overflow-hidden transition-all shadow-md ${borderClass} ${colSpanClass}`}
                 >
                   
@@ -534,7 +539,7 @@ const KDS = () => {
                     </div>
                   </div>
 
-                  {/* CORPS DU TICKET : C'est ici que les produits s'étalent en colonnes si le ticket est large */}
+                  {/* CORPS DU TICKET AVEC TEXTES PLUS PETITS */}
                   <div className={`p-1.5 bg-gray-100 flex-1 grid ${innerGridClass} gap-1.5 content-start`}>
                     {order.displayItems.map((item: any, idx: number) => {
                       const productName = item.product?.name || item.name || 'Produit inconnu';
@@ -543,15 +548,18 @@ const KDS = () => {
 
                       return (
                         <div key={idx} className="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-200 h-max">
-                          <div className="px-3 py-2.5 flex gap-2 items-center">
-                            <span className="text-white bg-slate-800 px-2 py-1 rounded text-sm font-black shadow-sm flex-shrink-0">{qty}x</span>
-                            <span className="text-[17px] font-black text-slate-900 uppercase tracking-tight leading-tight">{productName}</span>
+                          
+                          {/* LIGNE PRODUIT (15px) */}
+                          <div className="px-2.5 py-2 flex gap-1.5 items-center">
+                            <span className="text-white bg-slate-800 px-1.5 py-0.5 rounded text-xs font-black shadow-sm flex-shrink-0">{qty}x</span>
+                            <span className="text-[15px] font-black text-slate-900 uppercase tracking-tight leading-tight">{productName}</span>
                           </div>
                           
+                          {/* LIGNES OPTIONS (11px) */}
                           {options.length > 0 && (
-                            <div className="bg-slate-800 px-3 py-2 flex flex-col gap-1 border-t border-slate-700">
+                            <div className="bg-slate-800 px-2.5 py-1.5 flex flex-col gap-0.5 border-t border-slate-700">
                               {options.map((opt, oIdx) => (
-                                <div key={oIdx} className="text-[13px] text-white font-bold leading-tight uppercase tracking-wider flex items-start gap-1">
+                                <div key={oIdx} className="text-[11px] text-white font-bold leading-tight uppercase tracking-wider flex items-start gap-1">
                                    <span className="text-emerald-400 font-black mt-[1px]">↳</span> {opt}
                                 </div>
                               ))}
