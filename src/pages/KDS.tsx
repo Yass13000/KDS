@@ -48,7 +48,6 @@ const parseOrderDetails = (details: any): any[] => {
 const getFormattedOptions = (item: any, hiddenOptionNames: string[] = []) => {
   let rawOptions: any[] = [];
   
-  // Vérifie si le nom de l'option (ou du groupe) fait partie des éléments masqués
   const isHidden = (name: string) => {
     if (!name || typeof name !== 'string') return false;
     const normalized = name.toLowerCase().trim();
@@ -64,7 +63,6 @@ const getFormattedOptions = (item: any, hiddenOptionNames: string[] = []) => {
 
   const dynOpts = item.selectedSubOptions || item.selections || item.options || [];
 
-  // Dissociation pour les clés statiques
   if (item.boisson) {
     const boissonName = item.boisson.name || item.boisson;
     if (!isHidden(boissonName) && !isHidden('boisson')) {
@@ -79,7 +77,6 @@ const getFormattedOptions = (item: any, hiddenOptionNames: string[] = []) => {
     }
   }
 
-  // Aplatissement de toutes les autres options
   if (Array.isArray(dynOpts)) {
     dynOpts.forEach((group: any) => {
       if (group && group.options && Array.isArray(group.options)) {
@@ -99,7 +96,6 @@ const getFormattedOptions = (item: any, hiddenOptionNames: string[] = []) => {
     });
   }
 
-  // Formatage final avec LE FILTRE INTELLIGENT sur les noms des options
   const formattedList = rawOptions.map((opt, i) => {
     let name = "";
     let order = opt._print_order !== undefined ? opt._print_order : i;
@@ -111,7 +107,6 @@ const getFormattedOptions = (item: any, hiddenOptionNames: string[] = []) => {
     }
     return { name: name.trim(), order };
   }).filter(o => {
-    // On retire les mots vides ET toutes les options dont le nom est dans la liste noire de la BDD
     return o.name 
         && o.name.toLowerCase() !== 'option' 
         && o.name.toLowerCase() !== 'options' 
@@ -453,6 +448,11 @@ const KDS = () => {
 
   const historyOrders = orders
     .filter(o => !isActiveForKDS(o.status))
+    .filter(o => {
+      if (!o.created_at) return false;
+      const orderTime = new Date(o.created_at).getTime();
+      return (Date.now() - orderTime) <= 24 * 60 * 60 * 1000;
+    })
     .sort((a, b) => {
       const timeA = new Date(a.created_at).getTime() || 0;
       const timeB = new Date(b.created_at).getTime() || 0;
@@ -464,15 +464,24 @@ const KDS = () => {
   let currentSlots = 0;
 
   displayOrders.forEach(order => {
-    const itemCount = order.displayItems.length;
-    const slots = itemCount > 14 ? 3 : (itemCount > 7 ? 2 : 1);
+    // CALCUL DYNAMIQUE EN FONCTION DU NOMBRE TOTAL DE LIGNES (Produits + Options)
+    let totalLines = 0;
+    order.displayItems.forEach((item: any) => {
+      totalLines += 1; // 1 ligne pour le produit principal
+      const options = getFormattedOptions(item, hiddenOptionNames);
+      totalLines += options.length; // 1 ligne pour chaque option visible
+    });
+
+    // Si on a plus de 7 lignes, on prend 2 cases. Plus de 14 lignes, on prend 3 cases.
+    const slots = totalLines > 14 ? 3 : (totalLines > 7 ? 2 : 1);
+    const orderWithSlots = { ...order, _slots: slots };
     
     if (currentSlots + slots > 10 && currentPageOrders.length > 0) {
       pages.push(currentPageOrders);
-      currentPageOrders = [order];
+      currentPageOrders = [orderWithSlots];
       currentSlots = slots;
     } else {
-      currentPageOrders.push(order);
+      currentPageOrders.push(orderWithSlots);
       currentSlots += slots;
     }
   });
@@ -602,15 +611,16 @@ const KDS = () => {
             {visibleOrders.map((order) => {
               const status = order.status?.toLowerCase() || '';
               const isNewOrder = status === 'nouvelle';
-              const itemCount = order.displayItems.length;
+              // Utilise le nombre de slots calculé via le nombre de lignes réelles
+              const slots = order._slots || 1;
 
               let colSpanClass = "col-span-1";
               let colCountClass = "columns-1";
 
-              if (itemCount > 14) {
+              if (slots === 3) {
                 colSpanClass = "col-span-3";
                 colCountClass = "columns-3";
-              } else if (itemCount > 7) {
+              } else if (slots === 2) {
                 colSpanClass = "col-span-2";
                 colCountClass = "columns-2";
               }
@@ -636,8 +646,8 @@ const KDS = () => {
                     </div>
                   </div>
 
-                  {/* CORPS DU TICKET */}
-                  <div className={`p-1 flex-1 overflow-hidden ${colCountClass} gap-1 space-y-1`}>
+                  {/* CORPS DU TICKET AVEC ESPACEMENT CORRIGÉ (gap-1 au lieu de space-y-1) */}
+                  <div className={`p-1 flex-1 overflow-hidden ${colCountClass} gap-1`}>
                     {order.displayItems.map((item: any, idx: number) => {
                       const productName = item.product?.name || item.name || 'Produit inconnu';
                       const qty = item.quantity || 1;
@@ -645,13 +655,12 @@ const KDS = () => {
                       const options = getFormattedOptions(item, hiddenOptionNames);
 
                       return (
-                        <div key={idx} className="bg-white rounded-none border border-gray-300 break-inside-avoid">
+                        <div key={idx} className="bg-white rounded-none border border-gray-300 break-inside-avoid mb-1">
                           <div className="px-1.5 py-1 flex gap-1 items-center bg-white">
                             <span className="text-white bg-slate-800 px-1 py-px rounded-sm text-[11px] font-black flex-shrink-0">{qty}x</span>
                             <span className="text-[13px] font-black text-slate-900 uppercase leading-none tracking-tight">{productName}</span>
                           </div>
                           
-                          {/* MODIFICATION DE L'AFFICHAGE DES OPTIONS ICI */}
                           {options.length > 0 && (
                             <div className="bg-slate-800 px-1.5 py-1 flex flex-col gap-0 border-t border-slate-700">
                               {options.map((opt, oIdx) => (
