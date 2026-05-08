@@ -145,8 +145,8 @@ const HeaderClock = () => {
     return () => clearInterval(timer);
   }, []);
   return (
-    <div className="text-xs font-bold tracking-widest text-white/80 flex items-center gap-1.5 ml-2">
-      <Clock size={16} className="text-emerald-400" />
+    <div className="text-xs xl:text-sm 2xl:text-xl font-bold tracking-widest text-white/80 flex items-center gap-1.5 ml-2">
+      <Clock className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" />
       {time.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
     </div>
   );
@@ -173,8 +173,8 @@ const OrderTimer = ({ createdAt }: { createdAt: string }) => {
   else if (isWarning) timeColorClass = 'bg-orange-500 text-white border-transparent';
 
   return (
-    <div className={`flex items-center gap-1 px-1 py-0.5 border font-black text-[11px] tracking-wider transition-all ${timeColorClass}`}>
-      <Timer size={12} />{text}
+    <div className={`flex items-center gap-1 px-1 py-0.5 2xl:px-3 2xl:py-1.5 border font-black text-[11px] xl:text-sm 2xl:text-xl tracking-wider transition-all ${timeColorClass}`}>
+      <Timer className="w-3 h-3 xl:w-4 xl:h-4 2xl:w-6 2xl:h-6" />{text}
     </div>
   );
 };
@@ -192,6 +192,9 @@ const KDS = () => {
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [tempRestoId, setTempRestoId] = useState(activeRestoId);
   const [adminUnlockCount, setAdminUnlockCount] = useState(0);
+
+  // État dynamique pour les couleurs du restaurant
+  const [themeColors, setThemeColors] = useState({ primary: '#FBBF24', secondary: '#1e293b' });
 
   const [productDict, setProductDict] = useState<Record<string, string>>({});
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
@@ -236,8 +239,29 @@ const KDS = () => {
       audioRef.current.currentTime = 0;
       audioRef.current.play().catch(() => {
         setAudioEnabled(false);
-        toast.error("Son bloqué par le navigateur. Cliquez sur l'écran.", { icon: <VolumeX className="text-red-500" /> });
+        toast.error("Son bloqué par le navigateur. Cliquez sur l'écran.", { icon: <VolumeX className="w-5 h-5 text-red-500" /> });
       });
+    }
+  };
+
+  // NOUVEAU: Récupération des couleurs depuis la table 'restaurants'
+  const fetchTheme = async () => {
+    if (!activeRestoId) return;
+    try {
+      const { data, error } = await supabase
+        .from('restaurants')
+        .select('theme_primary, theme_secondary')
+        .eq('id', activeRestoId)
+        .single();
+        
+      if (data && !error) {
+        setThemeColors({
+          primary: data.theme_primary || '#FBBF24',
+          secondary: data.theme_secondary || '#1e293b'
+        });
+      }
+    } catch (e) {
+      console.error("Erreur de chargement du thème", e);
     }
   };
 
@@ -334,6 +358,7 @@ const KDS = () => {
     fetchOrders();
     fetchCatalog();
     fetchHiddenOptions();
+    fetchTheme(); // Chargement des couleurs au démarrage
     if (!activeRestoId) return;
 
     const ordersChannel = supabase
@@ -404,6 +429,7 @@ const KDS = () => {
     setActiveRestoId(tempRestoId.trim());
     fetchCatalog();
     fetchHiddenOptions();
+    fetchTheme(); // Recharge les couleurs au cas où le Resto ID change
     setAdminUnlockCount(0); 
     setIsSettingsOpen(false);
     toast.success("Configuration mise à jour !");
@@ -419,10 +445,10 @@ const KDS = () => {
 
   const getOrderTypeBadge = (typeId: string) => {
     switch(typeId) {
-      case ORDER_TYPE_IDS.SUR_PLACE: return <span className="text-[9px] font-black text-blue-600 bg-white px-1 py-0.5 uppercase tracking-widest">SP</span>;
-      case ORDER_TYPE_IDS.EMPORTER: return <span className="text-[9px] font-black text-orange-600 bg-white px-1 py-0.5 uppercase tracking-widest">EMP</span>;
-      case ORDER_TYPE_IDS.LIVRAISON: return <span className="text-[9px] font-black text-purple-600 bg-white px-1 py-0.5 uppercase tracking-widest">LIV</span>;
-      default: return <span className="text-[9px] font-black text-gray-600 bg-white px-1 py-0.5 uppercase tracking-widest">?</span>;
+      case ORDER_TYPE_IDS.SUR_PLACE: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-blue-600 bg-white px-1 2xl:px-2 py-0.5 uppercase tracking-widest">SP</span>;
+      case ORDER_TYPE_IDS.EMPORTER: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-orange-600 bg-white px-1 2xl:px-2 py-0.5 uppercase tracking-widest">EMP</span>;
+      case ORDER_TYPE_IDS.LIVRAISON: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-purple-600 bg-white px-1 2xl:px-2 py-0.5 uppercase tracking-widest">LIV</span>;
+      default: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-gray-600 bg-white px-1 2xl:px-2 py-0.5 uppercase tracking-widest">?</span>;
     }
   };
 
@@ -464,15 +490,13 @@ const KDS = () => {
   let currentSlots = 0;
 
   displayOrders.forEach(order => {
-    // CALCUL DYNAMIQUE EN FONCTION DU NOMBRE TOTAL DE LIGNES (Produits + Options)
     let totalLines = 0;
     order.displayItems.forEach((item: any) => {
-      totalLines += 1; // 1 ligne pour le produit principal
+      totalLines += 1;
       const options = getFormattedOptions(item, hiddenOptionNames);
-      totalLines += options.length; // 1 ligne pour chaque option visible
+      totalLines += options.length;
     });
 
-    // Si on a plus de 7 lignes, on prend 2 cases. Plus de 14 lignes, on prend 3 cases.
     const slots = totalLines > 14 ? 3 : (totalLines > 7 ? 2 : 1);
     const orderWithSlots = { ...order, _slots: slots };
     
@@ -522,9 +546,21 @@ const KDS = () => {
   }, [displayOrders, hiddenOptionNames]);
 
   return (
-    <div className="h-screen w-full bg-[#0f172a] text-white font-helvetica flex flex-col overflow-hidden relative" onClick={unlockAudio}>
+    <div 
+      className="h-screen w-full bg-secondary text-white font-helvetica flex flex-col overflow-hidden relative" 
+      onClick={unlockAudio}
+      style={{
+        // On injecte les couleurs dynamiques de Supabase dans des variables CSS Root
+        '--theme-primary': themeColors.primary,
+        '--theme-secondary': themeColors.secondary,
+      } as React.CSSProperties}
+    >
       <style>
         {`
+          /* INJECTION DYNAMIQUE DES CLASSES DE COULEURS DEPUIS SUPABASE */
+          .bg-secondary { background-color: var(--theme-secondary) !important; }
+          .text-primary { color: var(--theme-primary) !important; }
+
           @keyframes alert-blink {
             0% { border-color: #ef4444; box-shadow: inset 0 0 5px rgba(239, 68, 68, 0.4); }
             50% { border-color: #fca5a5; box-shadow: inset 0 0 15px rgba(239, 68, 68, 1); }
@@ -534,72 +570,76 @@ const KDS = () => {
           .slide-in-right { animation: slideIn 0.3s forwards cubic-bezier(0.16, 1, 0.3, 1); }
           @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
           
-          .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+          .custom-scrollbar::-webkit-scrollbar { width: 6px; }
           .custom-scrollbar::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); }
-          .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(200, 200, 200, 0.3); }
+          .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(200, 200, 200, 0.3); border-radius: 10px; }
         `}
       </style>
 
       {isOffline && (
-        <div className="absolute top-0 left-0 right-0 bg-red-600 text-white text-center py-1 font-black uppercase tracking-widest text-[10px] flex justify-center items-center gap-1.5 z-50 animate-pulse">
-          <WifiOff size={12} /> Hors ligne ! KDS non synchronisé.
+        <div className="absolute top-0 left-0 right-0 bg-red-600 text-white text-center py-1 2xl:py-2 font-black uppercase tracking-widest text-[10px] 2xl:text-base flex justify-center items-center gap-1.5 z-50 animate-pulse">
+          <WifiOff className="w-3 h-3 2xl:w-5 2xl:h-5" /> Hors ligne ! KDS non synchronisé.
         </div>
       )}
 
-      {/* HEADER RÉDUIT */}
-      <div className={`flex justify-between items-center px-2 py-1 bg-[#1e293b] border-b border-black/50 z-10 flex-shrink-0 ${isOffline ? 'mt-6' : ''}`}>
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-black uppercase tracking-widest text-white/50">
+      {/* HEADER ADAPTATIF */}
+      <div className={`flex justify-between items-center px-2 py-1 2xl:px-4 2xl:py-3 bg-secondary border-b border-black/50 z-10 flex-shrink-0 ${isOffline ? 'mt-6 2xl:mt-10' : ''}`}>
+        <div className="flex items-center gap-2 2xl:gap-4">
+          <span className="text-[11px] xl:text-sm 2xl:text-xl font-black uppercase tracking-widest text-white/50">
             {selectedCategories.length > 0 ? "KDS (FILTRÉ)" : "KDS"}
           </span>
           {!missingIdError && (
-            <span className="text-[10px] font-bold bg-white/10 px-2 py-0.5 rounded-sm text-white/70">
+            <span className="text-[10px] xl:text-xs 2xl:text-lg font-bold bg-white/10 px-2 py-0.5 2xl:px-3 2xl:py-1 rounded-sm text-white/70">
               {displayOrders.length} attente
             </span>
           )}
           
-          <button onClick={() => setIsHistoryOpen(true)} className="bg-white/5 hover:bg-white/10 p-1.5 rounded transition-colors relative ml-1" title="Historique">
-            <History size={16} className="text-white/80" />
+          <button onClick={() => setIsHistoryOpen(true)} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded transition-colors relative ml-1 2xl:ml-3" title="Historique">
+            <History className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" />
             {historyOrders.length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-emerald-500 text-slate-900 text-[9px] font-black px-1 rounded-sm">
+              <span className="absolute -top-1 -right-1 bg-emerald-500 text-slate-900 text-[9px] 2xl:text-sm font-black px-1 2xl:px-2 rounded-sm">
                 {historyOrders.length}
               </span>
             )}
           </button>
 
-          <button onClick={unlockAudio} className={`p-1.5 rounded ml-1 ${audioEnabled ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500 animate-pulse'}`} title="Son">
-            {audioEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+          <button onClick={unlockAudio} className={`p-1.5 2xl:p-3 rounded ml-1 2xl:ml-3 ${audioEnabled ? 'bg-emerald-500/10' : 'bg-red-500/10 animate-pulse'}`} title="Son">
+            {audioEnabled ? <Volume2 className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" /> : <VolumeX className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" />}
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 2xl:gap-4">
           {totalPages > 1 && (
-            <div className="flex items-center gap-1 bg-white/5 rounded p-0.5 border border-white/10">
-              <button onClick={(e) => { e.stopPropagation(); setCurrentPage(p => Math.max(0, p - 1)); }} disabled={safeCurrentPage === 0} className="p-1 hover:bg-white/10 disabled:opacity-30 rounded-sm"><ChevronLeft size={16} /></button>
-              <span className="text-[11px] font-bold px-1 text-white/70">{safeCurrentPage + 1}/{totalPages}</span>
-              <button onClick={(e) => { e.stopPropagation(); setCurrentPage(p => Math.min(totalPages - 1, p + 1)); }} disabled={safeCurrentPage === totalPages - 1} className="p-1 hover:bg-white/10 disabled:opacity-30 rounded-sm"><ChevronRight size={16} /></button>
+            <div className="flex items-center gap-1 2xl:gap-2 bg-white/5 rounded p-0.5 2xl:p-1.5 border border-white/10">
+              <button onClick={(e) => { e.stopPropagation(); setCurrentPage(p => Math.max(0, p - 1)); }} disabled={safeCurrentPage === 0} className="p-1 2xl:p-2 hover:bg-white/10 disabled:opacity-30 rounded-sm"><ChevronLeft className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" /></button>
+              <span className="text-[11px] xl:text-sm 2xl:text-xl font-bold px-1 2xl:px-3 text-white/70">{safeCurrentPage + 1}/{totalPages}</span>
+              <button onClick={(e) => { e.stopPropagation(); setCurrentPage(p => Math.min(totalPages - 1, p + 1)); }} disabled={safeCurrentPage === totalPages - 1} className="p-1 2xl:p-2 hover:bg-white/10 disabled:opacity-30 rounded-sm"><ChevronRight className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" /></button>
             </div>
           )}
 
-          <button onClick={() => setIsSummaryOpen(true)} className="bg-amber-500/20 hover:bg-amber-500/40 border border-amber-500/50 p-1.5 px-3 rounded flex items-center gap-1.5 relative">
-            <ClipboardList size={16} className="text-amber-400" />
-            <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest">Total</span>
+          <button onClick={() => setIsSummaryOpen(true)} className="bg-white/10 hover:bg-white/20 p-1.5 px-3 2xl:p-3 2xl:px-5 rounded flex items-center gap-1.5 2xl:gap-3 relative">
+            <ClipboardList className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" />
+            <span className="text-[10px] xl:text-xs 2xl:text-lg font-black text-primary uppercase tracking-widest">Total</span>
           </button>
 
-          <div className="w-px h-5 bg-white/20 mx-1"></div>
-          <button onClick={() => { fetchOrders(); fetchHiddenOptions(); }} className="bg-white/5 hover:bg-white/10 p-1.5 rounded"><RefreshCcw size={16} className={isLoading ? "animate-spin text-white/50" : "text-white/80"} /></button>
-          <button onClick={() => setIsSettingsOpen(true)} className="bg-white/5 hover:bg-white/10 p-1.5 rounded"><Settings size={16} className="text-white/80" /></button>
+          <div className="w-px h-5 2xl:h-8 bg-white/20 mx-1 2xl:mx-3"></div>
+          <button onClick={() => { fetchOrders(); fetchHiddenOptions(); }} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded">
+            <RefreshCcw className={`w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 ${isLoading ? "animate-spin text-primary/70" : "text-primary"}`} />
+          </button>
+          <button onClick={() => setIsSettingsOpen(true)} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded">
+            <Settings className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" />
+          </button>
           <HeaderClock />
         </div>
       </div>
 
       {missingIdError ? (
         <div className="flex-1 flex flex-col items-center justify-center p-4">
-          <div className="bg-red-500/10 border border-red-500/50 p-6 rounded-none text-center">
-            <AlertTriangle size={48} className="text-red-500 mx-auto mb-4" />
-            <h2 className="text-xl font-black mb-2">ID Restaurant Manquant</h2>
-            <button onClick={() => setIsSettingsOpen(true)} className="bg-white text-black font-black uppercase text-sm px-4 py-2 rounded-none flex justify-center items-center gap-2">
-              <Settings size={16} /> Configurer
+          <div className="bg-red-500/10 border border-red-500/50 p-6 2xl:p-12 rounded-none text-center">
+            <AlertTriangle className="w-12 h-12 2xl:w-24 2xl:h-24 text-red-500 mx-auto mb-4 2xl:mb-8" />
+            <h2 className="text-xl 2xl:text-4xl font-black mb-2 2xl:mb-4">ID Restaurant Manquant</h2>
+            <button onClick={() => setIsSettingsOpen(true)} className="bg-white text-black font-black uppercase text-sm 2xl:text-2xl px-4 py-2 2xl:px-8 2xl:py-4 rounded-none flex justify-center items-center gap-2 2xl:gap-4">
+              <Settings className="w-4 h-4 2xl:w-8 2xl:h-8" /> Configurer
             </button>
           </div>
         </div>
@@ -611,7 +651,6 @@ const KDS = () => {
             {visibleOrders.map((order) => {
               const status = order.status?.toLowerCase() || '';
               const isNewOrder = status === 'nouvelle';
-              // Utilise le nombre de slots calculé via le nombre de lignes réelles
               const slots = order._slots || 1;
 
               let colSpanClass = "col-span-1";
@@ -635,42 +674,61 @@ const KDS = () => {
                 >
                   
                   {/* EN TÊTE DU TICKET */}
-                  <div className={`${headerBgClass} p-1.5 flex justify-between items-center border-b border-black/20 flex-shrink-0`}>
-                    <div className="flex items-center gap-1">
-                      {isNewOrder && <BellRing size={12} className="text-white animate-bounce" />}
+                  <div className={`${headerBgClass} p-1.5 2xl:p-3 flex justify-between items-center border-b border-black/20 flex-shrink-0`}>
+                    <div className="flex items-center gap-1 2xl:gap-2">
+                      {isNewOrder && <BellRing className="w-3 h-3 2xl:w-6 2xl:h-6 text-white animate-bounce" />}
                       {getOrderTypeBadge(order.order_type_id)}
                     </div>
                     <OrderTimer createdAt={order.created_at} />
-                    <div className="text-[13px] font-black text-slate-900 bg-white px-1.5 rounded-sm">
+                    <div className="text-[13px] xl:text-lg 2xl:text-2xl font-black text-slate-900 bg-white px-1.5 2xl:px-3 rounded-sm">
                       {order.order_number || `#${order.id.toString().slice(-3)}`}
                     </div>
                   </div>
 
-                  {/* CORPS DU TICKET AVEC ESPACEMENT CORRIGÉ (gap-1 au lieu de space-y-1) */}
-                  <div className={`p-1 flex-1 overflow-hidden ${colCountClass} gap-1`}>
+                  {/* CORPS DU TICKET (REMPLISSAGE INTELLIGENT DE COLONNES SANS TROUS) */}
+                  <div className={`p-1 2xl:p-2 flex-1 overflow-hidden ${colCountClass}`} style={{ columnFill: 'auto', columnGap: '0.25rem' }}>
                     {order.displayItems.map((item: any, idx: number) => {
                       const productName = item.product?.name || item.name || 'Produit inconnu';
                       const qty = item.quantity || 1;
-                      
                       const options = getFormattedOptions(item, hiddenOptionNames);
+                      const hasOptions = options.length > 0;
 
                       return (
-                        <div key={idx} className="bg-white rounded-none border border-gray-300 break-inside-avoid mb-1">
-                          <div className="px-1.5 py-1 flex gap-1 items-center bg-white">
-                            <span className="text-white bg-slate-800 px-1 py-px rounded-sm text-[11px] font-black flex-shrink-0">{qty}x</span>
-                            <span className="text-[13px] font-black text-slate-900 uppercase leading-none tracking-tight">{productName}</span>
+                        <React.Fragment key={idx}>
+                          {/* LIGNE PRODUIT ENTIÈREMENT SÉPARÉE POUR ÉVITER LES BUGS */}
+                          <div 
+                            className={`px-1.5 py-1 2xl:px-3 2xl:py-2 bg-white break-inside-avoid ${hasOptions ? '' : 'mb-1 2xl:mb-2 shadow-sm'}`}
+                            style={{
+                              borderLeft: '1px solid #d1d5db',
+                              borderRight: '1px solid #d1d5db',
+                              borderTop: '1px solid #d1d5db',
+                              borderBottom: hasOptions ? 'none' : '1px solid #d1d5db'
+                            }}
+                          >
+                            <span className="inline-block text-white bg-slate-800 px-1 py-px 2xl:px-2 2xl:py-0.5 rounded-sm text-[11px] xl:text-sm 2xl:text-xl font-black mr-1 2xl:mr-2 align-middle">{qty}x</span>
+                            <span className="inline-block text-[13px] xl:text-base 2xl:text-2xl font-black text-slate-900 uppercase leading-none tracking-tight align-middle">{productName}</span>
                           </div>
                           
-                          {options.length > 0 && (
-                            <div className="bg-slate-800 px-1.5 py-1 flex flex-col gap-0 border-t border-slate-700">
-                              {options.map((opt, oIdx) => (
-                                <div key={oIdx} className="text-[13px] text-white font-black leading-none uppercase tracking-tight py-0.5">
-                                   {opt}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
+                          {/* LIGNES OPTIONS SÉPARÉES */}
+                          {options.map((opt, oIdx) => {
+                            const isFirst = oIdx === 0;
+                            const isLast = oIdx === options.length - 1;
+                            return (
+                              <div 
+                                key={oIdx} 
+                                className={`px-1.5 py-0.5 2xl:px-3 2xl:py-1 bg-slate-800 break-inside-avoid ${isLast ? 'mb-1 2xl:mb-2 shadow-sm' : ''}`}
+                                style={{
+                                  borderLeft: '1px solid #d1d5db',
+                                  borderRight: '1px solid #d1d5db',
+                                  borderTop: isFirst ? '1px solid #334155' : 'none',
+                                  borderBottom: isLast ? '1px solid #d1d5db' : 'none'
+                                }}
+                              >
+                                <span className="block text-[13px] xl:text-base 2xl:text-2xl text-white font-black leading-none uppercase tracking-tight">{opt}</span>
+                              </div>
+                            );
+                          })}
+                        </React.Fragment>
                       );
                     })}
                   </div>
@@ -678,12 +736,12 @@ const KDS = () => {
                   {/* BOUTON D'ACTION RÉDUIT */}
                   <div className="flex-shrink-0 border-t border-gray-300">
                     {isNewOrder ? (
-                      <button onClick={() => acceptOrder(order.id)} className="w-full bg-red-600 hover:bg-red-700 text-white font-black text-[11px] uppercase tracking-widest py-1.5 transition-colors flex justify-center items-center gap-1.5 rounded-none">
-                        <BellRing size={14} /> Accepter
+                      <button onClick={() => acceptOrder(order.id)} className="w-full bg-red-600 hover:bg-red-700 text-white font-black text-[11px] xl:text-sm 2xl:text-xl uppercase tracking-widest py-1.5 2xl:py-3 transition-colors flex justify-center items-center gap-1.5 2xl:gap-3 rounded-none">
+                        <BellRing className="w-3.5 h-3.5 2xl:w-6 2xl:h-6" /> Accepter
                       </button>
                     ) : (
-                      <button onClick={() => markOrderAsReady(order.id)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-900 font-black text-[11px] uppercase tracking-widest py-1.5 transition-colors flex justify-center items-center gap-1.5 rounded-none">
-                        <CheckCircle2 size={14} strokeWidth={3} /> Prêt
+                      <button onClick={() => markOrderAsReady(order.id)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-900 font-black text-[11px] xl:text-sm 2xl:text-xl uppercase tracking-widest py-1.5 2xl:py-3 transition-colors flex justify-center items-center gap-1.5 2xl:gap-3 rounded-none">
+                        <CheckCircle2 className="w-3.5 h-3.5 2xl:w-6 2xl:h-6" strokeWidth={3} /> Prêt
                       </button>
                     )}
                   </div>
@@ -699,23 +757,23 @@ const KDS = () => {
       {isSummaryOpen && (
         <>
           <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setIsSummaryOpen(false)} />
-          <div className="fixed top-0 right-0 h-full w-[300px] bg-[#1e293b] border-l border-white/10 z-50 flex flex-col slide-in-right rounded-none">
-            <div className="p-3 border-b border-white/10 flex justify-between items-center bg-amber-500/10">
-              <div className="flex items-center gap-2">
-                <ClipboardList size={20} className="text-amber-500" />
-                <h2 className="text-sm font-black uppercase text-amber-400">Total à préparer</h2>
+          <div className="fixed top-0 right-0 h-full w-[300px] 2xl:w-[500px] bg-secondary border-l border-white/10 z-50 flex flex-col slide-in-right rounded-none">
+            <div className="p-3 2xl:p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
+              <div className="flex items-center gap-2 2xl:gap-4">
+                <ClipboardList className="w-5 h-5 2xl:w-8 2xl:h-8 text-primary" />
+                <h2 className="text-sm 2xl:text-2xl font-black uppercase text-primary">Total à préparer</h2>
               </div>
-              <button onClick={() => setIsSummaryOpen(false)} className="text-white/50 hover:text-white p-1"><X size={18} /></button>
+              <button onClick={() => setIsSummaryOpen(false)} className="text-white/50 hover:text-white p-1 2xl:p-2"><X className="w-4 h-4 2xl:w-8 2xl:h-8" /></button>
             </div>
-            <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-3 2xl:p-6 custom-scrollbar">
               {consolidatedSummary.list.length === 0 ? (
-                <div className="text-center py-6 text-white/40 text-xs">Aucun article</div>
+                <div className="text-center py-6 2xl:py-12 text-white/40 text-xs 2xl:text-xl">Aucun article</div>
               ) : (
-                <ul className="space-y-1.5">
+                <ul className="space-y-1.5 2xl:space-y-3">
                   {consolidatedSummary.list.map((item, idx) => (
-                    <li key={idx} className="flex justify-between items-center bg-white/5 p-2 border border-white/5 rounded-none">
-                      <span className="text-[11px] font-bold text-white/90 truncate">{item.name}</span>
-                      <span className="bg-amber-500 text-slate-900 font-black text-[11px] px-2 py-0.5">{item.qty}</span>
+                    <li key={idx} className="flex justify-between items-center bg-white/5 p-2 2xl:p-4 border border-white/5 rounded-none">
+                      <span className="text-[11px] 2xl:text-xl font-bold text-white/90 truncate">{item.name}</span>
+                      <span className="bg-amber-500 text-slate-900 font-black text-[11px] 2xl:text-xl px-2 2xl:px-4 py-0.5 2xl:py-1">{item.qty}</span>
                     </li>
                   ))}
                 </ul>
@@ -727,35 +785,35 @@ const KDS = () => {
 
       {/* --- MODAL HISTORIQUE --- */}
       {isHistoryOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-[#1e293b] p-4 w-full max-w-2xl border border-white/10 flex flex-col max-h-[85vh] rounded-none">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-black uppercase text-white flex items-center gap-2"><History size={20}/> Historique</h2>
-              <button onClick={() => setIsHistoryOpen(false)} className="text-white/50 hover:text-white"><X size={20} /></button>
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 2xl:p-12">
+          <div className="bg-secondary p-4 2xl:p-8 w-full max-w-2xl 2xl:max-w-5xl border border-white/10 flex flex-col max-h-[85vh] rounded-none">
+            <div className="flex justify-between items-center mb-4 2xl:mb-8">
+              <h2 className="text-lg 2xl:text-3xl font-black uppercase text-white flex items-center gap-2 2xl:gap-4"><History className="w-5 h-5 2xl:w-8 2xl:h-8"/> Historique</h2>
+              <button onClick={() => setIsHistoryOpen(false)} className="text-white/50 hover:text-white"><X className="w-5 h-5 2xl:w-8 2xl:h-8" /></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
+            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 2xl:space-y-4">
               {historyOrders.length === 0 ? (
-                <div className="text-center py-6 text-white/40 text-xs">Aucune commande</div>
+                <div className="text-center py-6 2xl:py-12 text-white/40 text-xs 2xl:text-xl">Aucune commande récente</div>
               ) : (
                 historyOrders.map(order => {
                   const isClosed = order.status?.toLowerCase() === 'fermé' || order.status?.toLowerCase() === 'ferme';
                   const items = parseOrderDetails(order.order_details);
 
                   return (
-                    <div key={order.id} className="bg-white/5 border border-white/10 p-3 flex justify-between items-center rounded-none">
+                    <div key={order.id} className="bg-white/5 border border-white/10 p-3 2xl:p-6 flex justify-between items-center rounded-none">
                       <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-black text-sm text-white">{order.order_number || `#${order.id.toString().slice(-3)}`}</span>
-                          <span className={`px-1.5 py-0.5 text-[9px] font-black uppercase ${isClosed ? 'bg-white/10 text-white/50' : 'bg-emerald-500/20 text-emerald-400'}`}>{order.status}</span>
+                        <div className="flex items-center gap-2 2xl:gap-4 mb-1 2xl:mb-3">
+                          <span className="font-black text-sm 2xl:text-2xl text-white">{order.order_number || `#${order.id.toString().slice(-3)}`}</span>
+                          <span className={`px-1.5 py-0.5 2xl:px-3 2xl:py-1 text-[9px] 2xl:text-sm font-black uppercase ${isClosed ? 'bg-white/10 text-white/50' : 'bg-emerald-500/20 text-emerald-400'}`}>{order.status}</span>
                         </div>
-                        <div className="text-[11px] text-white/60">
+                        <div className="text-[11px] 2xl:text-lg text-white/60">
                           {items.filter(Boolean).map((i: any) => `${i.quantity || 1}x ${i.product?.name || i.name || 'Article'}`).join(' • ')}
                         </div>
                       </div>
                       
-                      <button onClick={() => revertOrder(order.id)} className="bg-white/10 hover:bg-amber-500 hover:text-slate-900 text-white font-black px-3 py-1.5 text-[10px] uppercase rounded-none transition-colors flex items-center gap-1">
-                        <RotateCcw size={12} /> Restaurer
+                      <button onClick={() => revertOrder(order.id)} className="bg-white/10 hover:bg-amber-500 hover:text-slate-900 text-white font-black px-3 py-1.5 2xl:px-6 2xl:py-3 text-[10px] 2xl:text-base uppercase rounded-none transition-colors flex items-center gap-1 2xl:gap-2">
+                        <RotateCcw className="w-3 h-3 2xl:w-5 2xl:h-5" /> Restaurer
                       </button>
                     </div>
                   );
@@ -768,33 +826,33 @@ const KDS = () => {
 
       {/* --- PARAMÈTRES --- */}
       {isSettingsOpen && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
-          <div className="bg-[#1e293b] w-full max-w-2xl border border-white/10 flex flex-col rounded-none">
-            <div className="p-4 border-b border-white/10 flex justify-between items-center bg-[#0f172a]">
-              <h2 className="text-base font-black uppercase text-white flex items-center gap-2" onClick={() => setAdminUnlockCount(p => p + 1)}><Settings size={20}/> Paramètres</h2>
-              <button onClick={() => { setIsSettingsOpen(false); setAdminUnlockCount(0); }} className="text-white/50 hover:text-white p-1"><X size={20} /></button>
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 2xl:p-12">
+          <div className="bg-secondary w-full max-w-2xl 2xl:max-w-5xl border border-white/10 flex flex-col rounded-none">
+            <div className="p-4 2xl:p-8 border-b border-white/10 flex justify-between items-center bg-secondary">
+              <h2 className="text-base 2xl:text-3xl font-black uppercase text-white flex items-center gap-2 2xl:gap-4" onClick={() => setAdminUnlockCount(p => p + 1)}><Settings className="w-5 h-5 2xl:w-8 2xl:h-8"/> Paramètres</h2>
+              <button onClick={() => { setIsSettingsOpen(false); setAdminUnlockCount(0); }} className="text-white/50 hover:text-white p-1 2xl:p-2"><X className="w-5 h-5 2xl:w-8 2xl:h-8" /></button>
             </div>
 
-            <div className="p-4 space-y-6">
+            <div className="p-4 2xl:p-8 space-y-6 2xl:space-y-12">
               {(!activeRestoId || adminUnlockCount >= 5) && (
                 <div>
-                  <label className="block text-[11px] font-bold text-emerald-500 uppercase mb-2">ID du Restaurant</label>
-                  <div className="flex gap-2">
-                    <input type="text" value={tempRestoId} onChange={(e) => setTempRestoId(e.target.value)} className="flex-1 bg-black/50 border border-white/20 px-3 py-2 text-white text-xs rounded-none focus:outline-none focus:border-emerald-500" />
-                    <button onClick={handleSaveSettings} className="bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-black uppercase px-4 py-2 text-[11px] rounded-none">Sauver</button>
+                  <label className="block text-[11px] 2xl:text-lg font-bold text-emerald-500 uppercase mb-2 2xl:mb-4">ID du Restaurant</label>
+                  <div className="flex gap-2 2xl:gap-4">
+                    <input type="text" value={tempRestoId} onChange={(e) => setTempRestoId(e.target.value)} className="flex-1 bg-black/50 border border-white/20 px-3 py-2 2xl:px-6 2xl:py-4 text-white text-xs 2xl:text-xl rounded-none focus:outline-none focus:border-emerald-500" />
+                    <button onClick={handleSaveSettings} className="bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-black uppercase px-4 py-2 2xl:px-8 2xl:py-4 text-[11px] 2xl:text-xl rounded-none">Sauver</button>
                   </div>
                 </div>
               )}
 
               <div>
-                <div className="flex justify-between items-end mb-2">
-                  <h3 className="text-xs font-black uppercase text-white flex items-center gap-1.5"><Filter size={14} className="text-amber-500"/> Filtres par catégorie</h3>
-                  {selectedCategories.length > 0 && <button onClick={() => { setSelectedCategories([]); localStorage.removeItem('kds_selected_categories'); }} className="text-[10px] text-red-400 font-bold uppercase">Tout afficher</button>}
+                <div className="flex justify-between items-end mb-2 2xl:mb-4">
+                  <h3 className="text-xs 2xl:text-xl font-black uppercase text-white flex items-center gap-1.5 2xl:gap-3"><Filter className="w-3.5 h-3.5 2xl:w-6 2xl:h-6 text-amber-500"/> Filtres par catégorie</h3>
+                  {selectedCategories.length > 0 && <button onClick={() => { setSelectedCategories([]); localStorage.removeItem('kds_selected_categories'); }} className="text-[10px] 2xl:text-base text-red-400 font-bold uppercase">Tout afficher</button>}
                 </div>
                 
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 2xl:gap-4">
                   {availableCategories.map(cat => (
-                    <button key={cat} onClick={() => toggleCategory(cat)} className={`px-3 py-1.5 text-[10px] font-black uppercase border rounded-none transition-colors ${selectedCategories.includes(cat) ? 'bg-amber-500 text-slate-900 border-amber-500' : 'bg-transparent text-white/70 border-white/20'}`}>
+                    <button key={cat} onClick={() => toggleCategory(cat)} className={`px-3 py-1.5 2xl:px-6 2xl:py-3 text-[10px] 2xl:text-base font-black uppercase border rounded-none transition-colors ${selectedCategories.includes(cat) ? 'bg-amber-500 text-slate-900 border-amber-500' : 'bg-transparent text-white/70 border-white/20'}`}>
                       {cat}
                     </button>
                   ))}
