@@ -44,7 +44,6 @@ const parseOrderDetails = (details: any): any[] => {
   return [];
 };
 
-// FONCTION DE FORMATAGE : VÉRIFIE LES NOMS DES OPTIONS DANS LA BDD
 const getFormattedOptions = (item: any, hiddenOptionNames: string[] = []) => {
   let rawOptions: any[] = [];
   
@@ -189,11 +188,9 @@ const KDS = () => {
   const [activeRestoId, setActiveRestoId] = useState(localStorage.getItem('pos_restaurant_id') || '');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [tempRestoId, setTempRestoId] = useState(activeRestoId);
   const [adminUnlockCount, setAdminUnlockCount] = useState(0);
 
-  // État dynamique pour les couleurs du restaurant
   const [themeColors, setThemeColors] = useState({ primary: '#FBBF24', secondary: '#1e293b' });
 
   const [productDict, setProductDict] = useState<Record<string, string>>({});
@@ -203,6 +200,9 @@ const KDS = () => {
   );
   
   const [hiddenOptionNames, setHiddenOptionNames] = useState<string[]>([]);
+
+  // ÉTAT POUR LE SUIVI DES LIGNES TERMINÉES
+  const [doneItems, setDoneItems] = useState<Record<string, boolean>>({});
 
   const [currentPage, setCurrentPage] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -244,7 +244,6 @@ const KDS = () => {
     }
   };
 
-  // NOUVEAU: Récupération des couleurs depuis la table 'restaurants'
   const fetchTheme = async () => {
     if (!activeRestoId) return;
     try {
@@ -358,7 +357,7 @@ const KDS = () => {
     fetchOrders();
     fetchCatalog();
     fetchHiddenOptions();
-    fetchTheme(); // Chargement des couleurs au démarrage
+    fetchTheme();
     if (!activeRestoId) return;
 
     const ordersChannel = supabase
@@ -429,7 +428,7 @@ const KDS = () => {
     setActiveRestoId(tempRestoId.trim());
     fetchCatalog();
     fetchHiddenOptions();
-    fetchTheme(); // Recharge les couleurs au cas où le Resto ID change
+    fetchTheme();
     setAdminUnlockCount(0); 
     setIsSettingsOpen(false);
     toast.success("Configuration mise à jour !");
@@ -458,19 +457,34 @@ const KDS = () => {
     return active.map(order => {
       const allItems = parseOrderDetails(order.order_details);
       
-      if (selectedCategories.length === 0) {
-        return { ...order, displayItems: allItems };
+      let filteredItems = allItems;
+      if (selectedCategories.length > 0) {
+        filteredItems = allItems.filter((item: any) => {
+          const productId = item.product?.id || item.id;
+          const category = productDict[productId?.toString()] || item.product?.category || item.category;
+          return category && selectedCategories.includes(category);
+        });
       }
 
-      const filteredItems = allItems.filter((item: any) => {
-        const productId = item.product?.id || item.id;
-        const category = productDict[productId?.toString()] || item.product?.category || item.category;
-        return category && selectedCategories.includes(category);
+      const groupedItems: any[] = [];
+      filteredItems.forEach((item: any) => {
+        const productName = item.product?.name || item.name || 'Produit inconnu';
+        const qty = item.quantity || 1;
+        
+        const options = getFormattedOptions(item, hiddenOptionNames);
+        const sig = `${productName}|${options.join('|')}`;
+        
+        const existing = groupedItems.find(g => g.sig === sig);
+        if (existing) {
+          existing.qty += qty;
+        } else {
+          groupedItems.push({ productName, qty, options, sig });
+        }
       });
 
-      return { ...order, displayItems: filteredItems };
-    }).filter(order => order.displayItems.length > 0);
-  }, [orders, selectedCategories, productDict]);
+      return { ...order, groupedItems };
+    }).filter(order => order.groupedItems.length > 0);
+  }, [orders, selectedCategories, productDict, hiddenOptionNames]);
 
   const historyOrders = orders
     .filter(o => !isActiveForKDS(o.status))
@@ -491,10 +505,10 @@ const KDS = () => {
 
   displayOrders.forEach(order => {
     let totalLines = 0;
-    order.displayItems.forEach((item: any) => {
-      totalLines += 1;
-      const options = getFormattedOptions(item, hiddenOptionNames);
-      totalLines += options.length;
+    
+    order.groupedItems.forEach((gItem: any) => {
+      totalLines += 1; 
+      totalLines += gItem.options.length; 
     });
 
     const slots = totalLines > 14 ? 3 : (totalLines > 7 ? 2 : 1);
@@ -515,49 +529,26 @@ const KDS = () => {
   const safeCurrentPage = Math.min(currentPage, Math.max(0, totalPages - 1));
   const visibleOrders = pages[safeCurrentPage] || [];
 
-  const consolidatedSummary = useMemo(() => {
-    const summary: Record<string, number> = {};
-    let totalItems = 0;
-
-    displayOrders.forEach(order => {
-      order.displayItems.forEach((item: any) => {
-        const name = item.product?.name || item.name || 'Produit Inconnu';
-        const qty = item.quantity || 1;
-        if (!summary[name]) summary[name] = 0;
-        summary[name] += qty;
-        totalItems += qty;
-
-        const options = getFormattedOptions(item, hiddenOptionNames);
-        options.forEach(opt => {
-          let optName = opt.replace(/^[0-9]+x\s*/, '').replace(/^\+\s*/, '').trim();
-          if (optName === "🍔 VERSION SOLO") return; 
-          let optQty = qty;
-          const match = opt.match(/^([0-9]+)x/);
-          if (match) optQty = qty * parseInt(match[1], 10);
-          if (!summary[optName]) summary[optName] = 0;
-          summary[optName] += optQty;
-          totalItems += optQty;
-        });
-      });
-    });
-
-    const sortedSummary = Object.entries(summary).map(([name, qty]) => ({ name, qty })).sort((a, b) => b.qty - a.qty);
-    return { list: sortedSummary, totalItems };
-  }, [displayOrders, hiddenOptionNames]);
+  // FONCTION POUR BASCULER L'ÉTAT "FAIT" D'UN PRODUIT
+  const toggleItemDone = (orderId: string, itemIdx: number) => {
+    const key = `${orderId}-${itemIdx}`;
+    setDoneItems(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
 
   return (
     <div 
       className="h-screen w-full bg-secondary text-white font-helvetica flex flex-col overflow-hidden relative" 
       onClick={unlockAudio}
       style={{
-        // On injecte les couleurs dynamiques de Supabase dans des variables CSS Root
         '--theme-primary': themeColors.primary,
         '--theme-secondary': themeColors.secondary,
       } as React.CSSProperties}
     >
       <style>
         {`
-          /* INJECTION DYNAMIQUE DES CLASSES DE COULEURS DEPUIS SUPABASE */
           .bg-secondary { background-color: var(--theme-secondary) !important; }
           .text-primary { color: var(--theme-primary) !important; }
 
@@ -616,11 +607,6 @@ const KDS = () => {
               <button onClick={(e) => { e.stopPropagation(); setCurrentPage(p => Math.min(totalPages - 1, p + 1)); }} disabled={safeCurrentPage === totalPages - 1} className="p-1 2xl:p-2 hover:bg-white/10 disabled:opacity-30 rounded-sm"><ChevronRight className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" /></button>
             </div>
           )}
-
-          <button onClick={() => setIsSummaryOpen(true)} className="bg-white/10 hover:bg-white/20 p-1.5 px-3 2xl:p-3 2xl:px-5 rounded flex items-center gap-1.5 2xl:gap-3 relative">
-            <ClipboardList className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" />
-            <span className="text-[10px] xl:text-xs 2xl:text-lg font-black text-primary uppercase tracking-widest">Total</span>
-          </button>
 
           <div className="w-px h-5 2xl:h-8 bg-white/20 mx-1 2xl:mx-3"></div>
           <button onClick={() => { fetchOrders(); fetchHiddenOptions(); }} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded">
@@ -687,17 +673,19 @@ const KDS = () => {
 
                   {/* CORPS DU TICKET (REMPLISSAGE INTELLIGENT DE COLONNES SANS TROUS) */}
                   <div className={`p-1 2xl:p-2 flex-1 overflow-hidden ${colCountClass}`} style={{ columnFill: 'auto', columnGap: '0.25rem' }}>
-                    {order.displayItems.map((item: any, idx: number) => {
-                      const productName = item.product?.name || item.name || 'Produit inconnu';
-                      const qty = item.quantity || 1;
-                      const options = getFormattedOptions(item, hiddenOptionNames);
+                    {order.groupedItems.map((gItem: any, idx: number) => {
+                      const { productName, qty, options } = gItem;
                       const hasOptions = options.length > 0;
+                      
+                      const itemKey = `${order.id}-${idx}`;
+                      const isDone = !!doneItems[itemKey]; // Vérifie si ce bloc a été cliqué
 
                       return (
                         <React.Fragment key={idx}>
-                          {/* LIGNE PRODUIT ENTIÈREMENT SÉPARÉE POUR ÉVITER LES BUGS */}
+                          {/* LIGNE PRODUIT CLIQUABLE */}
                           <div 
-                            className={`px-1.5 py-1 2xl:px-3 2xl:py-2 bg-white break-inside-avoid ${hasOptions ? '' : 'mb-1 2xl:mb-2 shadow-sm'}`}
+                            onClick={() => toggleItemDone(order.id, idx)}
+                            className={`px-1.5 py-1 2xl:px-3 2xl:py-2 break-inside-avoid cursor-pointer transition-colors ${hasOptions ? '' : 'mb-1 2xl:mb-2 shadow-sm'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
                             style={{
                               borderLeft: '1px solid #d1d5db',
                               borderRight: '1px solid #d1d5db',
@@ -705,26 +693,50 @@ const KDS = () => {
                               borderBottom: hasOptions ? 'none' : '1px solid #d1d5db'
                             }}
                           >
-                            <span className="inline-block text-white bg-slate-800 px-1 py-px 2xl:px-2 2xl:py-0.5 rounded-sm text-[11px] xl:text-sm 2xl:text-xl font-black mr-1 2xl:mr-2 align-middle">{qty}x</span>
-                            <span className="inline-block text-[13px] xl:text-base 2xl:text-2xl font-black text-slate-900 uppercase leading-none tracking-tight align-middle">{productName}</span>
+                            <span className={`inline-block px-1 py-px 2xl:px-2 2xl:py-0.5 rounded-sm text-[11px] xl:text-sm 2xl:text-xl font-black mr-1 2xl:mr-2 align-middle ${isDone ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-white'}`}>
+                              {qty}x
+                            </span>
+                            <span className={`inline-block text-[13px] xl:text-base 2xl:text-2xl font-black uppercase leading-none tracking-tight align-middle ${isDone ? 'text-emerald-950' : 'text-slate-900'}`}>
+                              {productName}
+                            </span>
                           </div>
                           
-                          {/* LIGNES OPTIONS SÉPARÉES */}
-                          {options.map((opt, oIdx) => {
+                          {/* LIGNES OPTIONS CLIQUABLES */}
+                          {options.map((opt: string, oIdx: number) => {
                             const isFirst = oIdx === 0;
                             const isLast = oIdx === options.length - 1;
+                            
+                            // Détection intelligente du mot "sans" (Même avec "2x + Sans Frites")
+                            const cleanOptName = opt.replace(/^[0-9]+x\s*/, '').replace(/^\+\s*/, '').trim().toLowerCase();
+                            const isSans = cleanOptName.startsWith('sans');
+
+                            // Gestion intelligente des couleurs de fond
+                            let bgClass = 'bg-slate-800';
+                            let textClass = 'text-white';
+                            
+                            if (isDone) {
+                              bgClass = 'bg-emerald-400';
+                              textClass = 'text-emerald-950';
+                            } else if (isSans) {
+                              bgClass = 'bg-red-500';
+                              textClass = 'text-white';
+                            }
+
                             return (
                               <div 
                                 key={oIdx} 
-                                className={`px-1.5 py-0.5 2xl:px-3 2xl:py-1 bg-slate-800 break-inside-avoid ${isLast ? 'mb-1 2xl:mb-2 shadow-sm' : ''}`}
+                                onClick={() => toggleItemDone(order.id, idx)}
+                                className={`px-1.5 py-0.5 2xl:px-3 2xl:py-1 break-inside-avoid cursor-pointer transition-colors ${bgClass} ${isLast ? 'mb-1 2xl:mb-2 shadow-sm' : ''}`}
                                 style={{
                                   borderLeft: '1px solid #d1d5db',
                                   borderRight: '1px solid #d1d5db',
-                                  borderTop: isFirst ? '1px solid #334155' : 'none',
+                                  borderTop: isFirst && !isDone ? '1px solid #334155' : (isFirst && isDone ? '1px solid #34d399' : 'none'),
                                   borderBottom: isLast ? '1px solid #d1d5db' : 'none'
                                 }}
                               >
-                                <span className="block text-[13px] xl:text-base 2xl:text-2xl text-white font-black leading-none uppercase tracking-tight">{opt}</span>
+                                <span className={`block text-[13px] xl:text-base 2xl:text-2xl font-black leading-none uppercase tracking-tight ${textClass}`}>
+                                  {opt}
+                                </span>
                               </div>
                             );
                           })}
@@ -751,36 +763,6 @@ const KDS = () => {
             })}
           </div>
         </div>
-      )}
-
-      {/* --- PANNEAU RÉSUMÉ --- */}
-      {isSummaryOpen && (
-        <>
-          <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setIsSummaryOpen(false)} />
-          <div className="fixed top-0 right-0 h-full w-[300px] 2xl:w-[500px] bg-secondary border-l border-white/10 z-50 flex flex-col slide-in-right rounded-none">
-            <div className="p-3 2xl:p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
-              <div className="flex items-center gap-2 2xl:gap-4">
-                <ClipboardList className="w-5 h-5 2xl:w-8 2xl:h-8 text-primary" />
-                <h2 className="text-sm 2xl:text-2xl font-black uppercase text-primary">Total à préparer</h2>
-              </div>
-              <button onClick={() => setIsSummaryOpen(false)} className="text-white/50 hover:text-white p-1 2xl:p-2"><X className="w-4 h-4 2xl:w-8 2xl:h-8" /></button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3 2xl:p-6 custom-scrollbar">
-              {consolidatedSummary.list.length === 0 ? (
-                <div className="text-center py-6 2xl:py-12 text-white/40 text-xs 2xl:text-xl">Aucun article</div>
-              ) : (
-                <ul className="space-y-1.5 2xl:space-y-3">
-                  {consolidatedSummary.list.map((item, idx) => (
-                    <li key={idx} className="flex justify-between items-center bg-white/5 p-2 2xl:p-4 border border-white/5 rounded-none">
-                      <span className="text-[11px] 2xl:text-xl font-bold text-white/90 truncate">{item.name}</span>
-                      <span className="bg-amber-500 text-slate-900 font-black text-[11px] 2xl:text-xl px-2 2xl:px-4 py-0.5 2xl:py-1">{item.qty}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-        </>
       )}
 
       {/* --- MODAL HISTORIQUE --- */}
