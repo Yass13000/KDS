@@ -11,10 +11,8 @@ import {
   RefreshCcw,
   Settings,
   X,
-  Store,
   History,
   RotateCcw,
-  ClipboardList,
   ChevronLeft,
   ChevronRight,
   Volume2,
@@ -499,13 +497,14 @@ const KDS = () => {
       return timeB - timeA;
     });
   
+  // LOGIQUE DE PAGINATION (5 CASES PAR LIGNE, 2 LIGNES MAX)
   const pages: any[][] = [];
   let currentPageOrders: any[] = [];
-  let currentSlots = 0;
+  let currentSlotsInRow = 0;
+  let rowsInCurrentPage = 1;
 
   displayOrders.forEach(order => {
     let totalLines = 0;
-    
     order.groupedItems.forEach((gItem: any) => {
       totalLines += 1; 
       totalLines += gItem.options.length; 
@@ -514,22 +513,29 @@ const KDS = () => {
     const slots = totalLines > 14 ? 3 : (totalLines > 7 ? 2 : 1);
     const orderWithSlots = { ...order, _slots: slots };
     
-    if (currentSlots + slots > 10 && currentPageOrders.length > 0) {
+    if (currentSlotsInRow + slots > 5) {
+      rowsInCurrentPage++;
+      currentSlotsInRow = slots;
+    } else {
+      currentSlotsInRow += slots;
+    }
+
+    if (rowsInCurrentPage > 2) {
       pages.push(currentPageOrders);
       currentPageOrders = [orderWithSlots];
-      currentSlots = slots;
+      rowsInCurrentPage = 1;
+      currentSlotsInRow = slots;
     } else {
       currentPageOrders.push(orderWithSlots);
-      currentSlots += slots;
     }
   });
+
   if (currentPageOrders.length > 0) pages.push(currentPageOrders);
 
   const totalPages = pages.length;
   const safeCurrentPage = Math.min(currentPage, Math.max(0, totalPages - 1));
   const visibleOrders = pages[safeCurrentPage] || [];
 
-  // FONCTION POUR BASCULER L'ÉTAT "FAIT" D'UN PRODUIT
   const toggleItemDone = (orderId: string, itemIdx: number) => {
     const key = `${orderId}-${itemIdx}`;
     setDoneItems(prev => ({
@@ -630,7 +636,7 @@ const KDS = () => {
           </div>
         </div>
       ) : (
-        /* GRILLE 5x2 STRICTE SANS ESPACE */
+        /* GRILLE 5x2 STRICTE */
         <div className="flex-1 w-full overflow-hidden bg-gray-200">
           <div className="grid grid-cols-5 grid-rows-2 w-full h-full gap-0">
             
@@ -678,14 +684,14 @@ const KDS = () => {
                       const hasOptions = options.length > 0;
                       
                       const itemKey = `${order.id}-${idx}`;
-                      const isDone = !!doneItems[itemKey]; // Vérifie si ce bloc a été cliqué
+                      const isDone = !!doneItems[itemKey];
 
                       return (
                         <React.Fragment key={idx}>
-                          {/* LIGNE PRODUIT CLIQUABLE */}
+                          {/* LIGNE PRODUIT (FLEX-NOWRAP FORCE LE MAINTIEN SUR 1 LIGNE) */}
                           <div 
                             onClick={() => toggleItemDone(order.id, idx)}
-                            className={`px-1.5 py-1 2xl:px-3 2xl:py-2 break-inside-avoid cursor-pointer transition-colors ${hasOptions ? '' : 'mb-1 2xl:mb-2 shadow-sm'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
+                            className={`px-1.5 py-1 2xl:px-3 2xl:py-2 break-inside-avoid cursor-pointer transition-colors flex items-center flex-nowrap whitespace-nowrap overflow-visible ${hasOptions ? '' : 'mb-1 2xl:mb-2 shadow-sm'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
                             style={{
                               borderLeft: '1px solid #d1d5db',
                               borderRight: '1px solid #d1d5db',
@@ -693,24 +699,22 @@ const KDS = () => {
                               borderBottom: hasOptions ? 'none' : '1px solid #d1d5db'
                             }}
                           >
-                            <span className={`inline-block px-1 py-px 2xl:px-2 2xl:py-0.5 rounded-sm text-[11px] xl:text-sm 2xl:text-xl font-black mr-1 2xl:mr-2 align-middle ${isDone ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-white'}`}>
+                            <span className={`px-1 py-px 2xl:px-2 2xl:py-0.5 rounded-sm text-[10px] xl:text-[12px] 2xl:text-[18px] font-black mr-1 2xl:mr-2 flex-shrink-0 ${isDone ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-white'}`}>
                               {qty}x
                             </span>
-                            <span className={`inline-block text-[13px] xl:text-base 2xl:text-2xl font-black uppercase leading-none tracking-tight align-middle ${isDone ? 'text-emerald-950' : 'text-slate-900'}`}>
+                            <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black uppercase leading-none tracking-tighter whitespace-nowrap flex-shrink-0 ${isDone ? 'text-emerald-950' : 'text-slate-900'}`}>
                               {productName}
                             </span>
                           </div>
                           
-                          {/* LIGNES OPTIONS CLIQUABLES */}
+                          {/* LIGNES OPTIONS (FLEX-NOWRAP FORCE LE MAINTIEN SUR 1 LIGNE) */}
                           {options.map((opt: string, oIdx: number) => {
                             const isFirst = oIdx === 0;
                             const isLast = oIdx === options.length - 1;
                             
-                            // Détection intelligente du mot "sans" (Même avec "2x + Sans Frites")
                             const cleanOptName = opt.replace(/^[0-9]+x\s*/, '').replace(/^\+\s*/, '').trim().toLowerCase();
                             const isSans = cleanOptName.startsWith('sans');
 
-                            // Gestion intelligente des couleurs de fond
                             let bgClass = 'bg-slate-800';
                             let textClass = 'text-white';
                             
@@ -726,7 +730,7 @@ const KDS = () => {
                               <div 
                                 key={oIdx} 
                                 onClick={() => toggleItemDone(order.id, idx)}
-                                className={`px-1.5 py-0.5 2xl:px-3 2xl:py-1 break-inside-avoid cursor-pointer transition-colors ${bgClass} ${isLast ? 'mb-1 2xl:mb-2 shadow-sm' : ''}`}
+                                className={`px-1.5 py-0.5 2xl:px-3 2xl:py-1 break-inside-avoid cursor-pointer transition-colors flex items-center flex-nowrap whitespace-nowrap overflow-visible ${bgClass} ${isLast ? 'mb-1 2xl:mb-2 shadow-sm' : ''}`}
                                 style={{
                                   borderLeft: '1px solid #d1d5db',
                                   borderRight: '1px solid #d1d5db',
@@ -734,7 +738,7 @@ const KDS = () => {
                                   borderBottom: isLast ? '1px solid #d1d5db' : 'none'
                                 }}
                               >
-                                <span className={`block text-[13px] xl:text-base 2xl:text-2xl font-black leading-none uppercase tracking-tight ${textClass}`}>
+                                <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black leading-none uppercase tracking-tighter whitespace-nowrap flex-shrink-0 ${textClass}`}>
                                   {opt}
                                 </span>
                               </div>
