@@ -13,6 +13,8 @@ import {
   X,
   History,
   RotateCcw,
+  ChevronLeft,
+  ChevronRight,
   Volume2,
   VolumeX,
   WifiOff,
@@ -126,7 +128,6 @@ const getFormattedOptions = (item: any, hiddenOptionNames: string[] = []) => {
   return finalOptions.map(o => o.qty > 1 ? `${o.qty}x ${o.name}` : o.name);
 };
 
-// CORRECTIF 1 : Cacher les commandes annulées !
 const isActiveForKDS = (status: string) => {
   const s = status?.toLowerCase() || '';
   if (s === 'prête' || s === 'prete' || s === 'prêt' || s === 'pret') return false;
@@ -216,7 +217,6 @@ const KDS = () => {
     };
   }, [activeRestoId]);
 
-  // Nettoyage de la mémoire pour éviter que la tablette rame au bout de quelques heures
   useEffect(() => {
     setDoneItems(prev => {
       const activeIds = orders.filter(o => isActiveForKDS(o.status)).map(o => o.id.toString());
@@ -234,7 +234,6 @@ const KDS = () => {
     });
   }, [orders]);
 
-  // CORRECTIF 4 : Auto-sync toutes les 3 minutes (sécurité si la tablette coupe les websockets)
   useEffect(() => {
     const interval = setInterval(() => {
       fetchOrders();
@@ -363,7 +362,7 @@ const KDS = () => {
       const past24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const { data, error } = await supabase
         .from('orders')
-        .select('*')
+        .select('id, status, created_at, order_number, order_type_id, order_details') // Opti
         .eq('restaurant_id', activeRestoId)
         .gte('created_at', past24Hours.toISOString())
         .order('created_at', { ascending: true });
@@ -506,12 +505,16 @@ const KDS = () => {
         }
       });
 
+      // Calcul mathématique précis des colonnes (8 lignes = 1 colonne)
       let totalLines = 0;
       groupedItems.forEach((gItem: any) => {
         totalLines += 1; 
         totalLines += gItem.options.length; 
       });
-      const slots = totalLines > 14 ? 3 : (totalLines > 7 ? 2 : 1);
+      
+      let slots = Math.ceil(totalLines / 8);
+      if (slots < 1) slots = 1;
+      if (slots > 5) slots = 5;
 
       return { ...order, groupedItems, _slots: slots };
     }).filter(order => order.groupedItems.length > 0);
@@ -530,7 +533,6 @@ const KDS = () => {
       return timeB - timeA;
     });
 
-  // CORRECTIF 3 : Utilisation de la signature exacte du produit pour éviter les décalages de surbrillance
   const toggleItemDone = (orderId: string, itemSig: string) => {
     const key = `${orderId}-${itemSig}`;
     setDoneItems(prev => ({
@@ -600,7 +602,6 @@ const KDS = () => {
         </div>
 
         <div className="flex items-center gap-2 2xl:gap-4">
-          {/* CORRECTIF 5 : Flèches de pagination inutiles supprimées proprement ici */}
           <div className="w-px h-5 2xl:h-8 bg-white/20 mx-1 2xl:mx-3"></div>
           <button onClick={() => { fetchOrders(); fetchHiddenOptions(); }} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded">
             <RefreshCcw className={`w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 ${isLoading ? "animate-spin text-primary/70" : "text-primary"}`} />
@@ -623,7 +624,7 @@ const KDS = () => {
           </div>
         </div>
       ) : (
-        /* ZONE DE GRILLE SCROLLABLE A L'INFINI AVEC TICKETS EXTENSIBLES (h-fit) */
+        /* ZONE DE GRILLE SCROLLABLE A L'INFINI AVEC TICKETS FIXES */
         <div className="flex-1 w-full overflow-y-auto bg-gray-200 custom-scrollbar">
           <div className="grid grid-cols-5 w-full gap-0 auto-rows-max">
             
@@ -632,16 +633,14 @@ const KDS = () => {
               const isNewOrder = status === 'nouvelle';
               const slots = order._slots || 1;
 
+              // Attribution des colonnes dynamiques
               let colSpanClass = "col-span-1";
               let colCountClass = "columns-1";
 
-              if (slots === 3) {
-                colSpanClass = "col-span-3";
-                colCountClass = "columns-3";
-              } else if (slots === 2) {
-                colSpanClass = "col-span-2";
-                colCountClass = "columns-2";
-              }
+              if (slots === 5) { colSpanClass = "col-span-5"; colCountClass = "columns-5"; }
+              else if (slots === 4) { colSpanClass = "col-span-4"; colCountClass = "columns-4"; }
+              else if (slots === 3) { colSpanClass = "col-span-3"; colCountClass = "columns-3"; }
+              else if (slots === 2) { colSpanClass = "col-span-2"; colCountClass = "columns-2"; }
 
               let headerBgClass = isNewOrder ? 'bg-red-600' : 'bg-amber-600'; 
               let borderClass = isNewOrder ? 'border-2 border-red-500 animate-alert' : 'border-r border-b border-gray-400';
@@ -649,8 +648,8 @@ const KDS = () => {
               return (
                 <div 
                   key={order.id} 
-                  // CORRECTIF 2 : h-fit permet au ticket de s'agrandir au lieu de couper les infos en bas
-                  className={`bg-gray-100 flex flex-col rounded-none min-h-[40vh] 2xl:min-h-[45vh] h-fit ${borderClass} ${colSpanClass}`}
+                  // TICKET TAILLE FIXE (h-[46dvh] pour rentrer pile 2 fois sur l'écran en hauteur)
+                  className={`bg-gray-100 flex flex-col overflow-hidden rounded-none h-[46dvh] ${borderClass} ${colSpanClass}`}
                 >
                   
                   {/* EN TÊTE DU TICKET */}
@@ -665,8 +664,8 @@ const KDS = () => {
                     </div>
                   </div>
 
-                  {/* CORPS DU TICKET (overflow-visible au lieu de overflow-hidden) */}
-                  <div className={`p-1 2xl:p-2 flex-1 overflow-visible ${colCountClass}`} style={{ columnFill: 'auto', columnGap: '0.25rem' }}>
+                  {/* CORPS DU TICKET AVEC REMPLISSAGE AUTO (Quand ça touche le bas, ça passe à la colonne suivante) */}
+                  <div className={`p-1 2xl:p-2 flex-1 overflow-hidden ${colCountClass}`} style={{ columnFill: 'auto', columnGap: '0.25rem' }}>
                     {order.groupedItems.map((gItem: any, idx: number) => {
                       const { productName, qty, options, sig } = gItem;
                       const hasOptions = options.length > 0;
@@ -676,7 +675,7 @@ const KDS = () => {
 
                       return (
                         <React.Fragment key={itemKey}>
-                          {/* LIGNE PRODUIT */}
+                          {/* LIGNE PRODUIT (FLEX-NOWRAP FORCE LE MAINTIEN SUR 1 LIGNE) */}
                           <div 
                             onClick={() => toggleItemDone(order.id, sig)}
                             className={`px-1.5 py-1 2xl:px-3 2xl:py-2 break-inside-avoid cursor-pointer transition-colors flex items-center flex-nowrap whitespace-nowrap overflow-hidden ${hasOptions ? '' : 'mb-1 2xl:mb-2 shadow-sm'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
@@ -695,7 +694,7 @@ const KDS = () => {
                             </span>
                           </div>
                           
-                          {/* LIGNES OPTIONS */}
+                          {/* LIGNES OPTIONS (FLEX-NOWRAP FORCE LE MAINTIEN SUR 1 LIGNE) */}
                           {options.map((opt: string, oIdx: number) => {
                             const isFirst = oIdx === 0;
                             const isLast = oIdx === options.length - 1;
