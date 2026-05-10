@@ -513,13 +513,15 @@ const KDS = () => {
     const slots = totalLines > 14 ? 3 : (totalLines > 7 ? 2 : 1);
     const orderWithSlots = { ...order, _slots: slots };
     
+    // Si la commande ne rentre plus sur la ligne actuelle
     if (currentSlotsInRow + slots > 5) {
-      rowsInCurrentPage++;
-      currentSlotsInRow = slots;
+      rowsInCurrentPage++; // On passe à la ligne suivante
+      currentSlotsInRow = slots; // On reset le compteur de la ligne
     } else {
-      currentSlotsInRow += slots;
+      currentSlotsInRow += slots; // Sinon on ajoute à la ligne actuelle
     }
 
+    // Si on déborde de la 2ème ligne -> On change de page !
     if (rowsInCurrentPage > 2) {
       pages.push(currentPageOrders);
       currentPageOrders = [orderWithSlots];
@@ -546,7 +548,8 @@ const KDS = () => {
 
   return (
     <div 
-      className="h-screen w-full bg-secondary text-white font-helvetica flex flex-col overflow-hidden relative" 
+      // LA CORRECTION MAGIQUE POUR TABLETTE EST ICI (h-[100dvh] remplace h-screen)
+      className="h-[100dvh] w-full bg-secondary text-white font-helvetica flex flex-col overflow-hidden relative" 
       onClick={unlockAudio}
       style={{
         '--theme-primary': themeColors.primary,
@@ -564,8 +567,6 @@ const KDS = () => {
             100% { border-color: #ef4444; box-shadow: inset 0 0 5px rgba(239, 68, 68, 0.4); }
           }
           .animate-alert { animation: alert-blink 0.8s ease-in-out infinite; }
-          .slide-in-right { animation: slideIn 0.3s forwards cubic-bezier(0.16, 1, 0.3, 1); }
-          @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
           
           .custom-scrollbar::-webkit-scrollbar { width: 6px; }
           .custom-scrollbar::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); }
