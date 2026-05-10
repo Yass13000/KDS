@@ -13,6 +13,8 @@ import {
   X,
   History,
   RotateCcw,
+  ChevronLeft,
+  ChevronRight,
   Volume2,
   VolumeX,
   WifiOff,
@@ -199,16 +201,39 @@ const KDS = () => {
   const [doneItems, setDoneItems] = useState<Record<string, boolean>>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // PATCH 1 : Synchronisation au retour en ligne
   useEffect(() => {
-    const handleOnline = () => setIsOffline(false);
+    const handleOnline = () => {
+      setIsOffline(false);
+      fetchOrders(); // On recharge les commandes manquées pendant la coupure !
+    };
     const handleOffline = () => setIsOffline(true);
+    
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [activeRestoId]);
+
+  // PATCH 2 : Nettoyage de la mémoire (fuite mémoire évitée)
+  useEffect(() => {
+    setDoneItems(prev => {
+      const activeIds = orders.filter(o => isActiveForKDS(o.status)).map(o => o.id.toString());
+      let hasChanges = false;
+      const next = { ...prev };
+      
+      Object.keys(next).forEach(key => {
+        const orderId = key.split('-')[0];
+        if (!activeIds.includes(orderId)) {
+          delete next[key]; // Supprime les clics des commandes terminées
+          hasChanges = true;
+        }
+      });
+      return hasChanges ? next : prev;
+    });
+  }, [orders]);
 
   useEffect(() => {
     const audio = new Audio(ALERT_SOUND_URL);
@@ -637,11 +662,12 @@ const KDS = () => {
                       const { productName, qty, options } = gItem;
                       const hasOptions = options.length > 0;
                       
+                      // PATCH 3 : Clé React unique sécurisée
                       const itemKey = `${order.id}-${idx}`;
                       const isDone = !!doneItems[itemKey];
 
                       return (
-                        <React.Fragment key={idx}>
+                        <React.Fragment key={itemKey}>
                           {/* LIGNE PRODUIT (FLEX-NOWRAP FORCE LE MAINTIEN SUR 1 LIGNE) */}
                           <div 
                             onClick={() => toggleItemDone(order.id, idx)}
@@ -682,7 +708,7 @@ const KDS = () => {
 
                             return (
                               <div 
-                                key={oIdx} 
+                                key={`${itemKey}-opt-${oIdx}`} 
                                 onClick={() => toggleItemDone(order.id, idx)}
                                 className={`px-1.5 py-0.5 2xl:px-3 2xl:py-1 break-inside-avoid cursor-pointer transition-colors flex items-center flex-nowrap whitespace-nowrap overflow-visible ${bgClass} ${isLast ? 'mb-1 2xl:mb-2 shadow-sm' : ''}`}
                                 style={{
