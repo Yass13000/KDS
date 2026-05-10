@@ -13,8 +13,6 @@ import {
   X,
   History,
   RotateCcw,
-  ChevronLeft,
-  ChevronRight,
   Volume2,
   VolumeX,
   WifiOff,
@@ -128,10 +126,12 @@ const getFormattedOptions = (item: any, hiddenOptionNames: string[] = []) => {
   return finalOptions.map(o => o.qty > 1 ? `${o.qty}x ${o.name}` : o.name);
 };
 
+// CORRECTIF 1 : Cacher les commandes annulées !
 const isActiveForKDS = (status: string) => {
   const s = status?.toLowerCase() || '';
   if (s === 'prête' || s === 'prete' || s === 'prêt' || s === 'pret') return false;
   if (s === 'fermé' || s === 'ferme' || s === 'terminée' || s === 'terminee') return false;
+  if (s === 'annulée' || s === 'annulee') return false; 
   return true; 
 };
 
@@ -201,11 +201,10 @@ const KDS = () => {
   const [doneItems, setDoneItems] = useState<Record<string, boolean>>({});
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // PATCH 1 : Synchronisation au retour en ligne
   useEffect(() => {
     const handleOnline = () => {
       setIsOffline(false);
-      fetchOrders(); // On recharge les commandes manquées pendant la coupure !
+      fetchOrders(); 
     };
     const handleOffline = () => setIsOffline(true);
     
@@ -217,7 +216,7 @@ const KDS = () => {
     };
   }, [activeRestoId]);
 
-  // PATCH 2 : Nettoyage de la mémoire (fuite mémoire évitée)
+  // Nettoyage de la mémoire pour éviter que la tablette rame au bout de quelques heures
   useEffect(() => {
     setDoneItems(prev => {
       const activeIds = orders.filter(o => isActiveForKDS(o.status)).map(o => o.id.toString());
@@ -227,13 +226,21 @@ const KDS = () => {
       Object.keys(next).forEach(key => {
         const orderId = key.split('-')[0];
         if (!activeIds.includes(orderId)) {
-          delete next[key]; // Supprime les clics des commandes terminées
+          delete next[key]; 
           hasChanges = true;
         }
       });
       return hasChanges ? next : prev;
     });
   }, [orders]);
+
+  // CORRECTIF 4 : Auto-sync toutes les 3 minutes (sécurité si la tablette coupe les websockets)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchOrders();
+    }, 3 * 60 * 1000); 
+    return () => clearInterval(interval);
+  }, [activeRestoId]);
 
   useEffect(() => {
     const audio = new Audio(ALERT_SOUND_URL);
@@ -499,7 +506,6 @@ const KDS = () => {
         }
       });
 
-      // Calcul des "slots" pour la largeur
       let totalLines = 0;
       groupedItems.forEach((gItem: any) => {
         totalLines += 1; 
@@ -524,8 +530,9 @@ const KDS = () => {
       return timeB - timeA;
     });
 
-  const toggleItemDone = (orderId: string, itemIdx: number) => {
-    const key = `${orderId}-${itemIdx}`;
+  // CORRECTIF 3 : Utilisation de la signature exacte du produit pour éviter les décalages de surbrillance
+  const toggleItemDone = (orderId: string, itemSig: string) => {
+    const key = `${orderId}-${itemSig}`;
     setDoneItems(prev => ({
       ...prev,
       [key]: !prev[key]
@@ -593,6 +600,7 @@ const KDS = () => {
         </div>
 
         <div className="flex items-center gap-2 2xl:gap-4">
+          {/* CORRECTIF 5 : Flèches de pagination inutiles supprimées proprement ici */}
           <div className="w-px h-5 2xl:h-8 bg-white/20 mx-1 2xl:mx-3"></div>
           <button onClick={() => { fetchOrders(); fetchHiddenOptions(); }} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded">
             <RefreshCcw className={`w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 ${isLoading ? "animate-spin text-primary/70" : "text-primary"}`} />
@@ -615,7 +623,7 @@ const KDS = () => {
           </div>
         </div>
       ) : (
-        /* ZONE DE GRILLE SCROLLABLE (PAGINATION RETIRÉE) */
+        /* ZONE DE GRILLE SCROLLABLE A L'INFINI AVEC TICKETS EXTENSIBLES (h-fit) */
         <div className="flex-1 w-full overflow-y-auto bg-gray-200 custom-scrollbar">
           <div className="grid grid-cols-5 w-full gap-0 auto-rows-max">
             
@@ -641,7 +649,8 @@ const KDS = () => {
               return (
                 <div 
                   key={order.id} 
-                  className={`bg-gray-100 flex flex-col overflow-hidden rounded-none min-h-[40vh] 2xl:min-h-[45vh] ${borderClass} ${colSpanClass}`}
+                  // CORRECTIF 2 : h-fit permet au ticket de s'agrandir au lieu de couper les infos en bas
+                  className={`bg-gray-100 flex flex-col rounded-none min-h-[40vh] 2xl:min-h-[45vh] h-fit ${borderClass} ${colSpanClass}`}
                 >
                   
                   {/* EN TÊTE DU TICKET */}
@@ -656,22 +665,21 @@ const KDS = () => {
                     </div>
                   </div>
 
-                  {/* CORPS DU TICKET (REMPLISSAGE INTELLIGENT DE COLONNES SANS TROUS) */}
-                  <div className={`p-1 2xl:p-2 flex-1 overflow-hidden ${colCountClass}`} style={{ columnFill: 'auto', columnGap: '0.25rem' }}>
+                  {/* CORPS DU TICKET (overflow-visible au lieu de overflow-hidden) */}
+                  <div className={`p-1 2xl:p-2 flex-1 overflow-visible ${colCountClass}`} style={{ columnFill: 'auto', columnGap: '0.25rem' }}>
                     {order.groupedItems.map((gItem: any, idx: number) => {
-                      const { productName, qty, options } = gItem;
+                      const { productName, qty, options, sig } = gItem;
                       const hasOptions = options.length > 0;
                       
-                      // PATCH 3 : Clé React unique sécurisée
-                      const itemKey = `${order.id}-${idx}`;
+                      const itemKey = `${order.id}-${sig}`;
                       const isDone = !!doneItems[itemKey];
 
                       return (
                         <React.Fragment key={itemKey}>
-                          {/* LIGNE PRODUIT (FLEX-NOWRAP FORCE LE MAINTIEN SUR 1 LIGNE) */}
+                          {/* LIGNE PRODUIT */}
                           <div 
-                            onClick={() => toggleItemDone(order.id, idx)}
-                            className={`px-1.5 py-1 2xl:px-3 2xl:py-2 break-inside-avoid cursor-pointer transition-colors flex items-center flex-nowrap whitespace-nowrap overflow-visible ${hasOptions ? '' : 'mb-1 2xl:mb-2 shadow-sm'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
+                            onClick={() => toggleItemDone(order.id, sig)}
+                            className={`px-1.5 py-1 2xl:px-3 2xl:py-2 break-inside-avoid cursor-pointer transition-colors flex items-center flex-nowrap whitespace-nowrap overflow-hidden ${hasOptions ? '' : 'mb-1 2xl:mb-2 shadow-sm'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
                             style={{
                               borderLeft: '1px solid #d1d5db',
                               borderRight: '1px solid #d1d5db',
@@ -687,7 +695,7 @@ const KDS = () => {
                             </span>
                           </div>
                           
-                          {/* LIGNES OPTIONS (FLEX-NOWRAP FORCE LE MAINTIEN SUR 1 LIGNE) */}
+                          {/* LIGNES OPTIONS */}
                           {options.map((opt: string, oIdx: number) => {
                             const isFirst = oIdx === 0;
                             const isLast = oIdx === options.length - 1;
@@ -709,8 +717,8 @@ const KDS = () => {
                             return (
                               <div 
                                 key={`${itemKey}-opt-${oIdx}`} 
-                                onClick={() => toggleItemDone(order.id, idx)}
-                                className={`px-1.5 py-0.5 2xl:px-3 2xl:py-1 break-inside-avoid cursor-pointer transition-colors flex items-center flex-nowrap whitespace-nowrap overflow-visible ${bgClass} ${isLast ? 'mb-1 2xl:mb-2 shadow-sm' : ''}`}
+                                onClick={() => toggleItemDone(order.id, sig)}
+                                className={`px-1.5 py-0.5 2xl:px-3 2xl:py-1 break-inside-avoid cursor-pointer transition-colors flex items-center flex-nowrap whitespace-nowrap overflow-hidden ${bgClass} ${isLast ? 'mb-1 2xl:mb-2 shadow-sm' : ''}`}
                                 style={{
                                   borderLeft: '1px solid #d1d5db',
                                   borderRight: '1px solid #d1d5db',
@@ -763,7 +771,7 @@ const KDS = () => {
                 <div className="text-center py-6 2xl:py-12 text-white/40 text-xs 2xl:text-xl">Aucune commande récente</div>
               ) : (
                 historyOrders.map(order => {
-                  const isClosed = order.status?.toLowerCase() === 'fermé' || order.status?.toLowerCase() === 'ferme';
+                  const isClosed = order.status?.toLowerCase() === 'fermé' || order.status?.toLowerCase() === 'ferme' || order.status?.toLowerCase() === 'annulée';
                   const items = parseOrderDetails(order.order_details);
 
                   return (
