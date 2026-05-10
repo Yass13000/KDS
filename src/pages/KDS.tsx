@@ -13,8 +13,6 @@ import {
   X,
   History,
   RotateCcw,
-  ChevronLeft,
-  ChevronRight,
   Volume2,
   VolumeX,
   WifiOff,
@@ -198,11 +196,7 @@ const KDS = () => {
   );
   
   const [hiddenOptionNames, setHiddenOptionNames] = useState<string[]>([]);
-
-  // ÉTAT POUR LE SUIVI DES LIGNES TERMINÉES
   const [doneItems, setDoneItems] = useState<Record<string, boolean>>({});
-
-  const [currentPage, setCurrentPage] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
@@ -480,7 +474,15 @@ const KDS = () => {
         }
       });
 
-      return { ...order, groupedItems };
+      // Calcul des "slots" pour la largeur
+      let totalLines = 0;
+      groupedItems.forEach((gItem: any) => {
+        totalLines += 1; 
+        totalLines += gItem.options.length; 
+      });
+      const slots = totalLines > 14 ? 3 : (totalLines > 7 ? 2 : 1);
+
+      return { ...order, groupedItems, _slots: slots };
     }).filter(order => order.groupedItems.length > 0);
   }, [orders, selectedCategories, productDict, hiddenOptionNames]);
 
@@ -496,47 +498,6 @@ const KDS = () => {
       const timeB = new Date(b.created_at).getTime() || 0;
       return timeB - timeA;
     });
-  
-  // LOGIQUE DE PAGINATION (5 CASES PAR LIGNE, 2 LIGNES MAX)
-  const pages: any[][] = [];
-  let currentPageOrders: any[] = [];
-  let currentSlotsInRow = 0;
-  let rowsInCurrentPage = 1;
-
-  displayOrders.forEach(order => {
-    let totalLines = 0;
-    order.groupedItems.forEach((gItem: any) => {
-      totalLines += 1; 
-      totalLines += gItem.options.length; 
-    });
-
-    const slots = totalLines > 14 ? 3 : (totalLines > 7 ? 2 : 1);
-    const orderWithSlots = { ...order, _slots: slots };
-    
-    // Si la commande ne rentre plus sur la ligne actuelle
-    if (currentSlotsInRow + slots > 5) {
-      rowsInCurrentPage++; // On passe à la ligne suivante
-      currentSlotsInRow = slots; // On reset le compteur de la ligne
-    } else {
-      currentSlotsInRow += slots; // Sinon on ajoute à la ligne actuelle
-    }
-
-    // Si on déborde de la 2ème ligne -> On change de page !
-    if (rowsInCurrentPage > 2) {
-      pages.push(currentPageOrders);
-      currentPageOrders = [orderWithSlots];
-      rowsInCurrentPage = 1;
-      currentSlotsInRow = slots;
-    } else {
-      currentPageOrders.push(orderWithSlots);
-    }
-  });
-
-  if (currentPageOrders.length > 0) pages.push(currentPageOrders);
-
-  const totalPages = pages.length;
-  const safeCurrentPage = Math.min(currentPage, Math.max(0, totalPages - 1));
-  const visibleOrders = pages[safeCurrentPage] || [];
 
   const toggleItemDone = (orderId: string, itemIdx: number) => {
     const key = `${orderId}-${itemIdx}`;
@@ -548,7 +509,6 @@ const KDS = () => {
 
   return (
     <div 
-      // LA CORRECTION MAGIQUE POUR TABLETTE EST ICI (h-[100dvh] remplace h-screen)
       className="h-[100dvh] w-full bg-secondary text-white font-helvetica flex flex-col overflow-hidden relative" 
       onClick={unlockAudio}
       style={{
@@ -568,9 +528,10 @@ const KDS = () => {
           }
           .animate-alert { animation: alert-blink 0.8s ease-in-out infinite; }
           
-          .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-          .custom-scrollbar::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); }
-          .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(200, 200, 200, 0.3); border-radius: 10px; }
+          .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+          .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.1); }
+          .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(100, 100, 100, 0.5); border-radius: 10px; }
+          .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(100, 100, 100, 0.8); }
         `}
       </style>
 
@@ -607,14 +568,6 @@ const KDS = () => {
         </div>
 
         <div className="flex items-center gap-2 2xl:gap-4">
-          {totalPages > 1 && (
-            <div className="flex items-center gap-1 2xl:gap-2 bg-white/5 rounded p-0.5 2xl:p-1.5 border border-white/10">
-              <button onClick={(e) => { e.stopPropagation(); setCurrentPage(p => Math.max(0, p - 1)); }} disabled={safeCurrentPage === 0} className="p-1 2xl:p-2 hover:bg-white/10 disabled:opacity-30 rounded-sm"><ChevronLeft className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" /></button>
-              <span className="text-[11px] xl:text-sm 2xl:text-xl font-bold px-1 2xl:px-3 text-white/70">{safeCurrentPage + 1}/{totalPages}</span>
-              <button onClick={(e) => { e.stopPropagation(); setCurrentPage(p => Math.min(totalPages - 1, p + 1)); }} disabled={safeCurrentPage === totalPages - 1} className="p-1 2xl:p-2 hover:bg-white/10 disabled:opacity-30 rounded-sm"><ChevronRight className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" /></button>
-            </div>
-          )}
-
           <div className="w-px h-5 2xl:h-8 bg-white/20 mx-1 2xl:mx-3"></div>
           <button onClick={() => { fetchOrders(); fetchHiddenOptions(); }} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded">
             <RefreshCcw className={`w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 ${isLoading ? "animate-spin text-primary/70" : "text-primary"}`} />
@@ -637,11 +590,11 @@ const KDS = () => {
           </div>
         </div>
       ) : (
-        /* GRILLE 5x2 STRICTE */
-        <div className="flex-1 w-full overflow-hidden bg-gray-200">
-          <div className="grid grid-cols-5 grid-rows-2 w-full h-full gap-0">
+        /* ZONE DE GRILLE SCROLLABLE (PAGINATION RETIRÉE) */
+        <div className="flex-1 w-full overflow-y-auto bg-gray-200 custom-scrollbar">
+          <div className="grid grid-cols-5 w-full gap-0 auto-rows-max">
             
-            {visibleOrders.map((order) => {
+            {displayOrders.map((order) => {
               const status = order.status?.toLowerCase() || '';
               const isNewOrder = status === 'nouvelle';
               const slots = order._slots || 1;
@@ -663,7 +616,7 @@ const KDS = () => {
               return (
                 <div 
                   key={order.id} 
-                  className={`bg-gray-100 flex flex-col overflow-hidden rounded-none ${borderClass} ${colSpanClass}`}
+                  className={`bg-gray-100 flex flex-col overflow-hidden rounded-none min-h-[40vh] 2xl:min-h-[45vh] ${borderClass} ${colSpanClass}`}
                 >
                   
                   {/* EN TÊTE DU TICKET */}
