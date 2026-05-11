@@ -832,4 +832,4 @@ const KDS = () => {
   );
 };
 
-export default KDS;e
+export default KDS;
