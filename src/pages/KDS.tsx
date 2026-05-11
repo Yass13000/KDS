@@ -29,7 +29,7 @@ const ORDER_TYPE_IDS = {
 
 const ALERT_SOUND_URL = "https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg";
 
-// --- RÉPARATION DU PARSEUR DE COMMANDES ---
+// --- PARSEUR DE COMMANDES ---
 const parseOrderDetails = (details: any): any[] => {
   if (Array.isArray(details)) return details;
   if (typeof details === 'string') {
@@ -352,7 +352,6 @@ const KDS = () => {
     }
   };
 
-  // --- CHANGEMENT DE LA LOGIQUE WEBSOCKET ---
   const fetchOrders = async () => {
     if (!activeRestoId) {
       setMissingIdError(true);
@@ -385,11 +384,9 @@ const KDS = () => {
     fetchTheme();
     if (!activeRestoId) return;
 
-    // Le WebSocket agit juste comme un déclencheur
     const ordersChannel = supabase
       .channel(`kds_orders_${activeRestoId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `restaurant_id=eq.${activeRestoId}` }, (payload) => {
-        // Au lieu de risquer un JSON tronqué via le payload, on relance la requête complète à chaque changement !
         fetchOrders();
         
         if (payload.eventType === 'INSERT') {
@@ -500,14 +497,15 @@ const KDS = () => {
         }
       });
 
-      // Calcul mathématique précis des colonnes (8 lignes = 1 colonne)
+      // Calcul des colonnes (slots)
       let totalLines = 0;
       groupedItems.forEach((gItem: any) => {
         totalLines += 1; 
         totalLines += gItem.options.length; 
       });
       
-      let slots = Math.ceil(totalLines / 8);
+      // On estime ~9 lignes affichables confortablement en hauteur.
+      let slots = Math.ceil(totalLines / 9);
       if (slots < 1) slots = 1;
       if (slots > 5) slots = 5;
 
@@ -557,7 +555,7 @@ const KDS = () => {
           }
           .animate-alert { animation: alert-blink 0.8s ease-in-out infinite; }
           
-          .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+          .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
           .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.1); }
           .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(100, 100, 100, 0.5); border-radius: 10px; }
           .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(100, 100, 100, 0.8); }
@@ -619,33 +617,30 @@ const KDS = () => {
           </div>
         </div>
       ) : (
-        /* ZONE DE GRILLE (GRID) POUR UNE MEILLEURE GESTION DE L'ESPACE ET DU SCROLL */
-        <div className="flex-1 w-full overflow-y-auto bg-gray-200 custom-scrollbar p-1">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-1 items-start">
+        <div className="flex-1 w-full overflow-y-auto bg-gray-200 custom-scrollbar">
+          <div className="grid grid-cols-5 w-full gap-0 auto-rows-max">
             
             {displayOrders.map((order) => {
               const status = order.status?.toLowerCase() || '';
               const isNewOrder = status === 'nouvelle';
               const slots = order._slots || 1;
 
-              // Gestion de la largeur des cartes (colspan)
               let colSpanClass = "col-span-1";
-              if (slots >= 5) { colSpanClass = "col-span-1 md:col-span-2 lg:col-span-3 xl:col-span-4 2xl:col-span-5"; }
-              else if (slots === 4) { colSpanClass = "col-span-1 md:col-span-2 lg:col-span-3 xl:col-span-4"; }
-              else if (slots === 3) { colSpanClass = "col-span-1 md:col-span-2 lg:col-span-3"; }
-              else if (slots === 2) { colSpanClass = "col-span-1 md:col-span-2"; }
+              if (slots === 5) { colSpanClass = "col-span-5"; }
+              else if (slots === 4) { colSpanClass = "col-span-4"; }
+              else if (slots === 3) { colSpanClass = "col-span-3"; }
+              else if (slots === 2) { colSpanClass = "col-span-2"; }
 
               let headerBgClass = isNewOrder ? 'bg-red-600' : 'bg-amber-600'; 
-              let borderClass = isNewOrder ? 'border-2 border-red-500 animate-alert' : 'border border-gray-400';
+              let borderClass = isNewOrder ? 'border-2 border-red-500 animate-alert' : 'border-r border-b border-gray-400';
 
               return (
                 <div 
                   key={order.id} 
-                  className={`bg-gray-100 flex flex-col rounded-none h-[46dvh] ${borderClass} ${colSpanClass}`}
+                  className={`bg-gray-100 flex flex-col overflow-hidden rounded-none h-[46dvh] ${borderClass} ${colSpanClass}`}
                 >
-                  
                   {/* EN TÊTE DU TICKET */}
-                  <div className={`${headerBgClass} p-1.5 2xl:p-3 flex justify-between items-center border-b border-black/20 flex-shrink-0`}>
+                  <div className={`${headerBgClass} p-1.5 2xl:p-3 flex justify-between items-center border-b border-black/20 flex-shrink-0 z-10`}>
                     <div className="flex items-center gap-1 2xl:gap-2">
                       {isNewOrder && <BellRing className="w-3 h-3 2xl:w-6 2xl:h-6 text-white animate-bounce" />}
                       {getOrderTypeBadge(order.order_type_id)}
@@ -656,43 +651,69 @@ const KDS = () => {
                     </div>
                   </div>
 
-                  {/* CORPS DU TICKET (SCROLLABLE SI TROP LONG) */}
-                  {/* J'ai supprimé la logique 'columns-X' pour utiliser un affichage linéaire classique et scrollable */}
-                  <div className={`p-1 2xl:p-2 flex-1 overflow-y-auto custom-scrollbar bg-gray-50 grid gap-1 items-start content-start`} style={{ gridTemplateColumns: `repeat(${slots}, minmax(0, 1fr))` }}>
-                    {order.groupedItems.map((gItem: any, idx: number) => {
-                      const { productName, qty, options, sig } = gItem;
-                      const hasOptions = options.length > 0;
-                      
-                      const itemKey = `${order.id}-${sig}`;
-                      const isDone = !!doneItems[itemKey];
-
-                      return (
-                        <div key={itemKey} className="flex flex-col break-inside-avoid">
-                          {/* LIGNE PRODUIT */}
-                          <div 
-                            onClick={() => toggleItemDone(order.id, sig)}
-                            className={`px-1.5 py-1 2xl:px-3 2xl:py-2 cursor-pointer transition-colors flex items-center ${hasOptions ? '' : 'mb-1 shadow-sm'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
-                            style={{
-                              borderLeft: '1px solid #d1d5db',
-                              borderRight: '1px solid #d1d5db',
-                              borderTop: '1px solid #d1d5db',
-                              borderBottom: hasOptions ? 'none' : '1px solid #d1d5db'
-                            }}
-                          >
-                            <span className={`px-1 py-px 2xl:px-2 2xl:py-0.5 rounded-sm text-[10px] xl:text-[12px] 2xl:text-[18px] font-black mr-1 2xl:mr-2 flex-shrink-0 ${isDone ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-white'}`}>
-                              {qty}x
-                            </span>
-                            <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black uppercase leading-tight ${isDone ? 'text-emerald-950' : 'text-slate-900'}`}>
-                              {productName}
-                            </span>
-                          </div>
+                  {/* NOUVEAU CORPS DU TICKET : CSS COLUMNS (MASONRY PARFAIT) */}
+                  <div className="flex-1 overflow-x-auto overflow-y-hidden custom-scrollbar p-1 2xl:p-2 bg-gray-50">
+                    
+                    {/* Le container avec une hauteur 100% force les colonnes à se remplir jusqu'en bas avant de passer à la suivante */}
+                    <div 
+                      className="h-full"
+                      style={{ 
+                        columnCount: slots, 
+                        columnFill: 'auto', 
+                        columnGap: '0.5rem'
+                      }}
+                    >
+                      {(() => {
+                        // On extrait CHAQUE ligne comme un élément indépendant pour le Masonry
+                        const flatLines: any[] = [];
+                        order.groupedItems.forEach((gItem: any) => {
+                          const itemKey = `${order.id}-${gItem.sig}`;
                           
-                          {/* LIGNES OPTIONS */}
-                          {options.map((opt: string, oIdx: number) => {
-                            const isFirst = oIdx === 0;
-                            const isLast = oIdx === options.length - 1;
-                            
-                            const cleanOptName = opt.replace(/^[0-9]+x\s*/, '').replace(/^\+\s*/, '').trim().toLowerCase();
+                          // Ligne Produit
+                          flatLines.push({
+                            id: `${itemKey}-prod`,
+                            isProduct: true,
+                            qty: gItem.qty,
+                            name: gItem.productName,
+                            sig: gItem.sig,
+                            itemKey,
+                            hasOptions: gItem.options.length > 0
+                          });
+                          
+                          // Lignes Options
+                          gItem.options.forEach((opt: string, oIdx: number) => {
+                             flatLines.push({
+                                id: `${itemKey}-opt-${oIdx}`,
+                                isProduct: false,
+                                name: opt,
+                                sig: gItem.sig,
+                                itemKey,
+                                isLast: oIdx === gItem.options.length - 1
+                             });
+                          });
+                        });
+
+                        return flatLines.map((line) => {
+                          const isDone = !!doneItems[line.itemKey];
+
+                          if (line.isProduct) {
+                            return (
+                              <div 
+                                key={line.id}
+                                onClick={() => toggleItemDone(order.id, line.sig)}
+                                // "break-inside-avoid" empêche le texte d'être coupé en plein milieu par le navigateur
+                                className={`break-inside-avoid px-1.5 py-1 2xl:px-3 2xl:py-2 cursor-pointer transition-colors flex items-start border-x border-gray-300 border-t ${!line.hasOptions ? 'border-b rounded-b-sm mb-1 2xl:mb-2 shadow-sm' : 'rounded-t-sm'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
+                              >
+                                <span className={`mt-0.5 px-1 py-px 2xl:px-2 2xl:py-0.5 rounded-sm text-[10px] xl:text-[12px] 2xl:text-[18px] font-black mr-1 2xl:mr-2 flex-shrink-0 ${isDone ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-white'}`}>
+                                  {line.qty}x
+                                </span>
+                                <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black uppercase leading-tight ${isDone ? 'text-emerald-950' : 'text-slate-900'}`}>
+                                  {line.name}
+                                </span>
+                              </div>
+                            );
+                          } else {
+                            const cleanOptName = line.name.replace(/^[0-9]+x\s*/, '').replace(/^\+\s*/, '').trim().toLowerCase();
                             const isSans = cleanOptName.startsWith('sans');
 
                             let bgClass = 'bg-slate-800';
@@ -708,29 +729,23 @@ const KDS = () => {
 
                             return (
                               <div 
-                                key={`${itemKey}-opt-${oIdx}`} 
-                                onClick={() => toggleItemDone(order.id, sig)}
-                                className={`px-1.5 py-0.5 2xl:px-3 2xl:py-1 cursor-pointer transition-colors flex items-center ${bgClass} ${isLast ? 'mb-1 shadow-sm' : ''}`}
-                                style={{
-                                  borderLeft: '1px solid #d1d5db',
-                                  borderRight: '1px solid #d1d5db',
-                                  borderTop: isFirst && !isDone ? '1px solid #334155' : (isFirst && isDone ? '1px solid #34d399' : 'none'),
-                                  borderBottom: isLast ? '1px solid #d1d5db' : 'none'
-                                }}
+                                key={line.id} 
+                                onClick={() => toggleItemDone(order.id, line.sig)}
+                                className={`break-inside-avoid px-1.5 py-0.5 2xl:px-3 2xl:py-1 cursor-pointer transition-colors flex items-start border-x border-gray-300 ${bgClass} ${line.isLast ? 'border-b rounded-b-sm mb-1 2xl:mb-2 shadow-sm' : 'border-b border-white/10'}`}
                               >
                                 <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black leading-tight uppercase ${textClass}`}>
-                                  {opt}
+                                  {line.name}
                                 </span>
                               </div>
                             );
-                          })}
-                        </div>
-                      );
-                    })}
+                          }
+                        });
+                      })()}
+                    </div>
                   </div>
 
                   {/* BOUTON D'ACTION RÉDUIT */}
-                  <div className="flex-shrink-0 border-t border-gray-300">
+                  <div className="flex-shrink-0 border-t border-gray-300 z-10">
                     {isNewOrder ? (
                       <button onClick={() => acceptOrder(order.id)} className="w-full bg-red-600 hover:bg-red-700 text-white font-black text-[11px] xl:text-sm 2xl:text-xl uppercase tracking-widest py-1.5 2xl:py-3 transition-colors flex justify-center items-center gap-1.5 2xl:gap-3 rounded-none">
                         <BellRing className="w-3.5 h-3.5 2xl:w-6 2xl:h-6" /> Accepter
