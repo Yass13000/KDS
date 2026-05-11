@@ -29,6 +29,7 @@ const ORDER_TYPE_IDS = {
 
 const ALERT_SOUND_URL = "https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg";
 
+// --- RÉPARATION DU PARSEUR DE COMMANDES ---
 const parseOrderDetails = (details: any): any[] => {
   if (Array.isArray(details)) return details;
   if (typeof details === 'string') {
@@ -351,6 +352,7 @@ const KDS = () => {
     }
   };
 
+  // --- CHANGEMENT DE LA LOGIQUE WEBSOCKET ---
   const fetchOrders = async () => {
     if (!activeRestoId) {
       setMissingIdError(true);
@@ -362,7 +364,7 @@ const KDS = () => {
       const past24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const { data, error } = await supabase
         .from('orders')
-        .select('id, status, created_at, order_number, order_type_id, order_details') // Opti
+        .select('id, status, created_at, order_number, order_type_id, order_details') 
         .eq('restaurant_id', activeRestoId)
         .gte('created_at', past24Hours.toISOString())
         .order('created_at', { ascending: true });
@@ -383,26 +385,19 @@ const KDS = () => {
     fetchTheme();
     if (!activeRestoId) return;
 
+    // Le WebSocket agit juste comme un déclencheur
     const ordersChannel = supabase
       .channel(`kds_orders_${activeRestoId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `restaurant_id=eq.${activeRestoId}` }, (payload) => {
+        // Au lieu de risquer un JSON tronqué via le payload, on relance la requête complète à chaque changement !
+        fetchOrders();
+        
         if (payload.eventType === 'INSERT') {
-          setOrders(prev => {
-            if (prev.find(o => o.id === payload.new.id)) return prev;
-            return [...prev, payload.new];
-          });
           if (payload.new.status?.toLowerCase() === 'nouvelle') playNotificationSound();
         } else if (payload.eventType === 'UPDATE') {
-          setOrders(prev => {
-            const exists = prev.find(o => o.id === payload.new.id);
-            if (exists) return prev.map(o => o.id === payload.new.id ? { ...o, ...payload.new } : o);
-            return [...prev, payload.new];
-          });
           const oldStatus = payload.old?.status?.toLowerCase();
           const newStatus = payload.new?.status?.toLowerCase();
           if (newStatus === 'nouvelle' && oldStatus !== 'nouvelle') playNotificationSound();
-        } else if (payload.eventType === 'DELETE') {
-          setOrders(prev => prev.filter(o => o.id !== payload.old.id));
         }
       })
       .subscribe();
@@ -624,32 +619,29 @@ const KDS = () => {
           </div>
         </div>
       ) : (
-        /* ZONE DE GRILLE SCROLLABLE A L'INFINI AVEC TICKETS FIXES */
-        <div className="flex-1 w-full overflow-y-auto bg-gray-200 custom-scrollbar">
-          <div className="grid grid-cols-5 w-full gap-0 auto-rows-max">
+        /* ZONE DE GRILLE (GRID) POUR UNE MEILLEURE GESTION DE L'ESPACE ET DU SCROLL */
+        <div className="flex-1 w-full overflow-y-auto bg-gray-200 custom-scrollbar p-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-1 items-start">
             
             {displayOrders.map((order) => {
               const status = order.status?.toLowerCase() || '';
               const isNewOrder = status === 'nouvelle';
               const slots = order._slots || 1;
 
-              // Attribution des colonnes dynamiques
+              // Gestion de la largeur des cartes (colspan)
               let colSpanClass = "col-span-1";
-              let colCountClass = "columns-1";
-
-              if (slots === 5) { colSpanClass = "col-span-5"; colCountClass = "columns-5"; }
-              else if (slots === 4) { colSpanClass = "col-span-4"; colCountClass = "columns-4"; }
-              else if (slots === 3) { colSpanClass = "col-span-3"; colCountClass = "columns-3"; }
-              else if (slots === 2) { colSpanClass = "col-span-2"; colCountClass = "columns-2"; }
+              if (slots >= 5) { colSpanClass = "col-span-1 md:col-span-2 lg:col-span-3 xl:col-span-4 2xl:col-span-5"; }
+              else if (slots === 4) { colSpanClass = "col-span-1 md:col-span-2 lg:col-span-3 xl:col-span-4"; }
+              else if (slots === 3) { colSpanClass = "col-span-1 md:col-span-2 lg:col-span-3"; }
+              else if (slots === 2) { colSpanClass = "col-span-1 md:col-span-2"; }
 
               let headerBgClass = isNewOrder ? 'bg-red-600' : 'bg-amber-600'; 
-              let borderClass = isNewOrder ? 'border-2 border-red-500 animate-alert' : 'border-r border-b border-gray-400';
+              let borderClass = isNewOrder ? 'border-2 border-red-500 animate-alert' : 'border border-gray-400';
 
               return (
                 <div 
                   key={order.id} 
-                  // TICKET TAILLE FIXE (h-[46dvh] pour rentrer pile 2 fois sur l'écran en hauteur)
-                  className={`bg-gray-100 flex flex-col overflow-hidden rounded-none h-[46dvh] ${borderClass} ${colSpanClass}`}
+                  className={`bg-gray-100 flex flex-col rounded-none h-[46dvh] ${borderClass} ${colSpanClass}`}
                 >
                   
                   {/* EN TÊTE DU TICKET */}
@@ -664,8 +656,9 @@ const KDS = () => {
                     </div>
                   </div>
 
-                  {/* CORPS DU TICKET AVEC REMPLISSAGE AUTO (Quand ça touche le bas, ça passe à la colonne suivante) */}
-                  <div className={`p-1 2xl:p-2 flex-1 overflow-hidden ${colCountClass}`} style={{ columnFill: 'auto', columnGap: '0.25rem' }}>
+                  {/* CORPS DU TICKET (SCROLLABLE SI TROP LONG) */}
+                  {/* J'ai supprimé la logique 'columns-X' pour utiliser un affichage linéaire classique et scrollable */}
+                  <div className={`p-1 2xl:p-2 flex-1 overflow-y-auto custom-scrollbar bg-gray-50 grid gap-1 items-start content-start`} style={{ gridTemplateColumns: `repeat(${slots}, minmax(0, 1fr))` }}>
                     {order.groupedItems.map((gItem: any, idx: number) => {
                       const { productName, qty, options, sig } = gItem;
                       const hasOptions = options.length > 0;
@@ -674,11 +667,11 @@ const KDS = () => {
                       const isDone = !!doneItems[itemKey];
 
                       return (
-                        <React.Fragment key={itemKey}>
-                          {/* LIGNE PRODUIT (FLEX-NOWRAP FORCE LE MAINTIEN SUR 1 LIGNE) */}
+                        <div key={itemKey} className="flex flex-col break-inside-avoid">
+                          {/* LIGNE PRODUIT */}
                           <div 
                             onClick={() => toggleItemDone(order.id, sig)}
-                            className={`px-1.5 py-1 2xl:px-3 2xl:py-2 break-inside-avoid cursor-pointer transition-colors flex items-center flex-nowrap whitespace-nowrap overflow-hidden ${hasOptions ? '' : 'mb-1 2xl:mb-2 shadow-sm'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
+                            className={`px-1.5 py-1 2xl:px-3 2xl:py-2 cursor-pointer transition-colors flex items-center ${hasOptions ? '' : 'mb-1 shadow-sm'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
                             style={{
                               borderLeft: '1px solid #d1d5db',
                               borderRight: '1px solid #d1d5db',
@@ -689,12 +682,12 @@ const KDS = () => {
                             <span className={`px-1 py-px 2xl:px-2 2xl:py-0.5 rounded-sm text-[10px] xl:text-[12px] 2xl:text-[18px] font-black mr-1 2xl:mr-2 flex-shrink-0 ${isDone ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-white'}`}>
                               {qty}x
                             </span>
-                            <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black uppercase leading-none tracking-tighter whitespace-nowrap flex-shrink-0 ${isDone ? 'text-emerald-950' : 'text-slate-900'}`}>
+                            <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black uppercase leading-tight ${isDone ? 'text-emerald-950' : 'text-slate-900'}`}>
                               {productName}
                             </span>
                           </div>
                           
-                          {/* LIGNES OPTIONS (FLEX-NOWRAP FORCE LE MAINTIEN SUR 1 LIGNE) */}
+                          {/* LIGNES OPTIONS */}
                           {options.map((opt: string, oIdx: number) => {
                             const isFirst = oIdx === 0;
                             const isLast = oIdx === options.length - 1;
@@ -717,7 +710,7 @@ const KDS = () => {
                               <div 
                                 key={`${itemKey}-opt-${oIdx}`} 
                                 onClick={() => toggleItemDone(order.id, sig)}
-                                className={`px-1.5 py-0.5 2xl:px-3 2xl:py-1 break-inside-avoid cursor-pointer transition-colors flex items-center flex-nowrap whitespace-nowrap overflow-hidden ${bgClass} ${isLast ? 'mb-1 2xl:mb-2 shadow-sm' : ''}`}
+                                className={`px-1.5 py-0.5 2xl:px-3 2xl:py-1 cursor-pointer transition-colors flex items-center ${bgClass} ${isLast ? 'mb-1 shadow-sm' : ''}`}
                                 style={{
                                   borderLeft: '1px solid #d1d5db',
                                   borderRight: '1px solid #d1d5db',
@@ -725,13 +718,13 @@ const KDS = () => {
                                   borderBottom: isLast ? '1px solid #d1d5db' : 'none'
                                 }}
                               >
-                                <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black leading-none uppercase tracking-tighter whitespace-nowrap flex-shrink-0 ${textClass}`}>
+                                <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black leading-tight uppercase ${textClass}`}>
                                   {opt}
                                 </span>
                               </div>
                             );
                           })}
-                        </React.Fragment>
+                        </div>
                       );
                     })}
                   </div>
@@ -839,4 +832,4 @@ const KDS = () => {
   );
 };
 
-export default KDS;
+export default KDS;e
