@@ -41,8 +41,9 @@ const App = () => {
     <QueryClientProvider client={queryClient}>
       <main className="min-h-screen w-full flex flex-col bg-[#0f172a] relative overflow-x-hidden font-helvetica select-none">
         
-        {/* Notifications (Toaster) en thème sombre */}
-        <Toaster position="top-center" richColors theme="dark" />
+        {/* 👇 C'EST ICI : Ajout de duration={800} pour les notifications de la cuisine */}
+        <Toaster position="top-center" richColors theme="dark" duration={800} />
+        
         
         <div className="flex-1 flex flex-col w-full relative">
           <BrowserRouter>
