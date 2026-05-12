@@ -29,6 +29,18 @@ const ORDER_TYPE_IDS = {
 
 const ALERT_SOUND_URL = "https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg";
 
+// --- LA SOLUTION : 7 LIGNES EXACTES PAR COLONNE ---
+const LINES_PER_COLUMN = 7; 
+
+const chunkArrayByLines = (arr: any[], linesPerCol: number) => {
+  if (arr.length === 0) return [];
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += linesPerCol) {
+    chunks.push(arr.slice(i, i + linesPerCol));
+  }
+  return chunks;
+};
+
 // --- PARSEUR DE COMMANDES ---
 const parseOrderDetails = (details: any): any[] => {
   if (Array.isArray(details)) return details;
@@ -388,7 +400,6 @@ const KDS = () => {
       .channel(`kds_orders_${activeRestoId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `restaurant_id=eq.${activeRestoId}` }, (payload) => {
         fetchOrders();
-        
         if (payload.eventType === 'INSERT') {
           if (payload.new.status?.toLowerCase() === 'nouvelle') playNotificationSound();
         } else if (payload.eventType === 'UPDATE') {
@@ -497,19 +508,18 @@ const KDS = () => {
         }
       });
 
-      // Calcul des colonnes (slots)
       let totalLines = 0;
       groupedItems.forEach((gItem: any) => {
         totalLines += 1; 
         totalLines += gItem.options.length; 
       });
       
-      // On estime ~9 lignes affichables confortablement en hauteur.
-      let slots = Math.ceil(totalLines / 9);
+      let slots = Math.ceil(totalLines / LINES_PER_COLUMN);
       if (slots < 1) slots = 1;
-      if (slots > 5) slots = 5;
+      
+      let displaySlots = slots > 5 ? 5 : slots;
 
-      return { ...order, groupedItems, _slots: slots };
+      return { ...order, groupedItems, _slots: displaySlots, rawSlots: slots };
     }).filter(order => order.groupedItems.length > 0);
   }, [orders, selectedCategories, productDict, hiddenOptionNames]);
 
@@ -555,7 +565,7 @@ const KDS = () => {
           }
           .animate-alert { animation: alert-blink 0.8s ease-in-out infinite; }
           
-          .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+          .custom-scrollbar::-webkit-scrollbar { width: 8px; }
           .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.1); }
           .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(100, 100, 100, 0.5); border-radius: 10px; }
           .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(100, 100, 100, 0.8); }
@@ -623,15 +633,24 @@ const KDS = () => {
             {displayOrders.map((order) => {
               const status = order.status?.toLowerCase() || '';
               const isNewOrder = status === 'nouvelle';
-              const slots = order._slots || 1;
+              const displaySlots = order._slots || 1; 
 
               let colSpanClass = "col-span-1";
-              if (slots === 5) { colSpanClass = "col-span-5"; }
-              else if (slots === 4) { colSpanClass = "col-span-4"; }
-              else if (slots === 3) { colSpanClass = "col-span-3"; }
-              else if (slots === 2) { colSpanClass = "col-span-2"; }
+              if (displaySlots === 5) { colSpanClass = "col-span-5"; }
+              else if (displaySlots === 4) { colSpanClass = "col-span-4"; }
+              else if (displaySlots === 3) { colSpanClass = "col-span-3"; }
+              else if (displaySlots === 2) { colSpanClass = "col-span-2"; }
 
-              let headerBgClass = isNewOrder ? 'bg-red-600' : 'bg-amber-600'; 
+              // --- MODIFICATION ICI : Couleurs de fond basées sur le order_type_id ---
+              let headerBgClass = 'bg-gray-500'; // Fallback
+              if (order.order_type_id === ORDER_TYPE_IDS.SUR_PLACE) {
+                headerBgClass = 'bg-orange-500'; // Beau orange
+              } else if (order.order_type_id === ORDER_TYPE_IDS.EMPORTER) {
+                headerBgClass = 'bg-[#b07d50]'; // Marron clair
+              } else if (order.order_type_id === ORDER_TYPE_IDS.LIVRAISON) {
+                headerBgClass = 'bg-blue-400'; // Bleu clair
+              }
+
               let borderClass = isNewOrder ? 'border-2 border-red-500 animate-alert' : 'border-r border-b border-gray-400';
 
               return (
@@ -639,7 +658,7 @@ const KDS = () => {
                   key={order.id} 
                   className={`bg-gray-100 flex flex-col overflow-hidden rounded-none h-[46dvh] ${borderClass} ${colSpanClass}`}
                 >
-                  {/* EN TÊTE DU TICKET */}
+                  {/* EN TÊTE DU TICKET (avec la nouvelle couleur) */}
                   <div className={`${headerBgClass} p-1.5 2xl:p-3 flex justify-between items-center border-b border-black/20 flex-shrink-0 z-10`}>
                     <div className="flex items-center gap-1 2xl:gap-2">
                       {isNewOrder && <BellRing className="w-3 h-3 2xl:w-6 2xl:h-6 text-white animate-bounce" />}
@@ -651,25 +670,24 @@ const KDS = () => {
                     </div>
                   </div>
 
-                  {/* NOUVEAU CORPS DU TICKET : CSS COLUMNS (MASONRY PARFAIT) */}
-                  <div className="flex-1 overflow-x-auto overflow-y-hidden custom-scrollbar p-1 2xl:p-2 bg-gray-50">
-                    
-                    {/* Le container avec une hauteur 100% force les colonnes à se remplir jusqu'en bas avant de passer à la suivante */}
+                  {/* CORPS DU TICKET : FRACTIONS STRICTES ET SCROLL ACTIVÉ */}
+                  <div 
+                    className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar bg-gray-50 p-1"
+                    style={{ WebkitOverflowScrolling: 'touch' }}
+                  >
                     <div 
-                      className="h-full"
+                      className="grid h-full" 
                       style={{ 
-                        columnCount: slots, 
-                        columnFill: 'auto', 
-                        columnGap: '0.5rem'
+                        gridTemplateColumns: `repeat(${displaySlots}, minmax(0, 1fr))`,
+                        gridAutoRows: '100%',
+                        gap: '0.25rem' 
                       }}
                     >
                       {(() => {
-                        // On extrait CHAQUE ligne comme un élément indépendant pour le Masonry
                         const flatLines: any[] = [];
                         order.groupedItems.forEach((gItem: any) => {
                           const itemKey = `${order.id}-${gItem.sig}`;
                           
-                          // Ligne Produit
                           flatLines.push({
                             id: `${itemKey}-prod`,
                             isProduct: true,
@@ -680,7 +698,6 @@ const KDS = () => {
                             hasOptions: gItem.options.length > 0
                           });
                           
-                          // Lignes Options
                           gItem.options.forEach((opt: string, oIdx: number) => {
                              flatLines.push({
                                 id: `${itemKey}-opt-${oIdx}`,
@@ -693,53 +710,64 @@ const KDS = () => {
                           });
                         });
 
-                        return flatLines.map((line) => {
-                          const isDone = !!doneItems[line.itemKey];
-
-                          if (line.isProduct) {
-                            return (
-                              <div 
-                                key={line.id}
-                                onClick={() => toggleItemDone(order.id, line.sig)}
-                                // "break-inside-avoid" empêche le texte d'être coupé en plein milieu par le navigateur
-                                className={`break-inside-avoid px-1.5 py-1 2xl:px-3 2xl:py-2 cursor-pointer transition-colors flex items-start border-x border-gray-300 border-t ${!line.hasOptions ? 'border-b rounded-b-sm mb-1 2xl:mb-2 shadow-sm' : 'rounded-t-sm'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
-                              >
-                                <span className={`mt-0.5 px-1 py-px 2xl:px-2 2xl:py-0.5 rounded-sm text-[10px] xl:text-[12px] 2xl:text-[18px] font-black mr-1 2xl:mr-2 flex-shrink-0 ${isDone ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-white'}`}>
-                                  {line.qty}x
-                                </span>
-                                <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black uppercase leading-tight ${isDone ? 'text-emerald-950' : 'text-slate-900'}`}>
-                                  {line.name}
-                                </span>
-                              </div>
-                            );
-                          } else {
-                            const cleanOptName = line.name.replace(/^[0-9]+x\s*/, '').replace(/^\+\s*/, '').trim().toLowerCase();
-                            const isSans = cleanOptName.startsWith('sans');
-
-                            let bgClass = 'bg-slate-800';
-                            let textClass = 'text-white';
+                        return chunkArrayByLines(flatLines, LINES_PER_COLUMN).map((columnLines, colIdx) => (
+                          
+                          <div 
+                            key={`col-${colIdx}`} 
+                            className="grid w-full h-full" 
+                            style={{ gridTemplateRows: 'repeat(7, minmax(0, 1fr))' }}
+                          >
                             
-                            if (isDone) {
-                              bgClass = 'bg-emerald-400';
-                              textClass = 'text-emerald-950';
-                            } else if (isSans) {
-                              bgClass = 'bg-red-500';
-                              textClass = 'text-white';
-                            }
+                            {columnLines.map((line: any, lineIdx: number) => {
+                              const isDone = !!doneItems[line.itemKey];
+                              const isChunkFirst = lineIdx === 0;
+                              const isChunkLast = lineIdx === columnLines.length - 1;
 
-                            return (
-                              <div 
-                                key={line.id} 
-                                onClick={() => toggleItemDone(order.id, line.sig)}
-                                className={`break-inside-avoid px-1.5 py-0.5 2xl:px-3 2xl:py-1 cursor-pointer transition-colors flex items-start border-x border-gray-300 ${bgClass} ${line.isLast ? 'border-b rounded-b-sm mb-1 2xl:mb-2 shadow-sm' : 'border-b border-white/10'}`}
-                              >
-                                <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black leading-tight uppercase ${textClass}`}>
-                                  {line.name}
-                                </span>
-                              </div>
-                            );
-                          }
-                        });
+                              if (line.isProduct) {
+                                return (
+                                  <div 
+                                    key={line.id}
+                                    onClick={() => toggleItemDone(order.id, line.sig)}
+                                    className={`min-h-0 w-full overflow-hidden flex items-center px-1.5 2xl:px-3 cursor-pointer transition-colors border-x border-gray-300 ${isChunkFirst ? 'border-t rounded-t-sm' : ''} ${(!line.hasOptions || isChunkLast) ? 'border-b rounded-b-sm shadow-sm' : 'border-b border-gray-200'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
+                                  >
+                                    <span className={`px-1 py-px 2xl:px-2 2xl:py-0.5 rounded-sm text-[10px] xl:text-[12px] 2xl:text-[18px] font-black mr-1 2xl:mr-2 flex-shrink-0 ${isDone ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-white'}`}>
+                                      {line.qty}x
+                                    </span>
+                                    <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black uppercase leading-tight truncate ${isDone ? 'text-emerald-950' : 'text-slate-900'}`}>
+                                      {line.name}
+                                    </span>
+                                  </div>
+                                );
+                              } else {
+                                const cleanOptName = line.name.replace(/^[0-9]+x\s*/, '').replace(/^\+\s*/, '').trim().toLowerCase();
+                                const isSans = cleanOptName.startsWith('sans');
+
+                                let bgClass = 'bg-slate-800';
+                                let textClass = 'text-white';
+                                
+                                if (isDone) {
+                                  bgClass = 'bg-emerald-400';
+                                  textClass = 'text-emerald-950';
+                                } else if (isSans) {
+                                  bgClass = 'bg-red-500';
+                                  textClass = 'text-white';
+                                }
+
+                                return (
+                                  <div 
+                                    key={line.id} 
+                                    onClick={() => toggleItemDone(order.id, line.sig)}
+                                    className={`min-h-0 w-full overflow-hidden flex items-center px-1.5 2xl:px-3 cursor-pointer transition-colors border-x border-gray-300 ${bgClass} ${isChunkFirst ? 'border-t rounded-t-sm' : ''} ${isChunkLast ? 'border-b rounded-b-sm shadow-sm' : 'border-b border-white/10'}`}
+                                  >
+                                    <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black uppercase leading-tight truncate ${textClass}`}>
+                                      {line.name}
+                                    </span>
+                                  </div>
+                                );
+                              }
+                            })}
+                          </div>
+                        ));
                       })()}
                     </div>
                   </div>
