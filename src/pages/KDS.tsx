@@ -39,6 +39,18 @@ const chunkArrayByLines = (arr: any[], linesPerCol: number) => {
   return chunks;
 };
 
+// --- NORMALISATION PARE-BALLES (SINGULIER / PLURIEL / ACCENTS) ---
+const normalizeText = (str: string) => {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Supprime les accents
+    .replace(/s\b/g, '') // Supprime les 's' en fin de mot (ex: menu toasts -> menu toast)
+    .replace(/[^a-z0-9\s]/g, '') // Nettoie les émojis/caractères spéciaux
+    .trim();
+};
+
 // --- PARSEUR DE COMMANDES ---
 const parseOrderDetails = (details: any): any[] => {
   if (Array.isArray(details)) return details;
@@ -320,7 +332,6 @@ const KDS = () => {
       }
       setDbHiddenCategories(hiddenCats);
 
-      // Chargement ID + Nom pour croiser les données pare-balles
       const { data } = await supabase.from('product').select('id, name, category').eq('restaurant_id', activeRestoId);
       if (data) {
         const dict: Record<string, string> = {};
@@ -507,11 +518,12 @@ const KDS = () => {
   };
 
   // ========================================================================
-  // FILTRAGE AVEC ANALYSE TEXTUELLE INTÉGRÉE POUR PARER LES IDS STANDARDS
+  // FILTRAGE ROBUSTE AVEC HARMONISATION INTERNE ET COMPATIBILITÉ TEXTUELLE PLURIELS
   // ========================================================================
   const displayOrders = useMemo(() => {
     const active = orders.filter(o => isActiveForKDS(o.status));
-    const normSelectedCats = selectedCategories.map(c => c.toLowerCase().trim());
+    const normSelectedCats = selectedCategories.map(c => normalizeText(c));
+    const normDbHiddenCategories = dbHiddenCategories.map(c => normalizeText(c));
     
     return active.map(order => {
       const allItems = parseOrderDetails(order.order_details);
@@ -519,7 +531,7 @@ const KDS = () => {
       const filteredItems = allItems.map((item: any) => {
         if (!item) return null;
         
-        // 1. Identification de l'ID produit principal
+        // 1. Identification robuste et nettoyage de l'ID produit (gère "179-loaded-0" -> "179")
         const productId = (item.product?.id || item.id || item.product_id || '').toString().trim();
         const baseProductId = productId.includes('-') ? productId.split('-')[0] : productId;
         
@@ -529,24 +541,29 @@ const KDS = () => {
         // 2. Détection triple sécurité : ID base -> ID complet -> Nom exact -> Contenu textuel
         let rawCategory = productDict[baseProductId] || productDict[productId] || productNameDict[itemInternalName] || item.product?.category || item.product?.category_id || item.category || item.category_id || '';
         
-        // Si la bdd n'a rien donné (mismatch UUID/Int), on cherche si le nom de l'article contient une catégorie connue (ex: "MENU TOAST" contient "TOAST")
+        // Fallback textuel intelligent normalisé (gère "menu toasts" vs "menu toast")
         if (!rawCategory && itemInternalName) {
+          const normItemName = normalizeText(itemInternalName);
           const foundCat = availableCategories.find(cat => {
-            const cNorm = cat.toLowerCase().trim();
-            return itemInternalName.includes(cNorm) || cNorm.includes(itemInternalName);
+            const normCat = normalizeText(cat);
+            return normCat && (normItemName.includes(normCat) || normCat.includes(normItemName));
           });
           if (foundCat) rawCategory = foundCat;
         }
 
         const mainCategory = rawCategory.toLowerCase().trim();
+        const mainCategoryNorm = normalizeText(mainCategory);
+
+        // Si aucune catégorie n'est détectée, on laisse passer le produit pour ne pas le perdre
+        if (!mainCategoryNorm) return item;
 
         // Filtrage BDD (show_on_kds = false)
-        if (dbHiddenCategories.includes(mainCategory)) {
+        if (normDbHiddenCategories.includes(mainCategoryNorm)) {
           return null;
         }
 
-        // Filtrage manuel (Filtres d'écran)
-        if (normSelectedCats.length > 0 && !normSelectedCats.includes(mainCategory)) {
+        // Filtrage d'écran tactile manuel
+        if (normSelectedCats.length > 0 && !normSelectedCats.includes(mainCategoryNorm)) {
           return null;
         }
 
@@ -559,12 +576,16 @@ const KDS = () => {
           
           let boissonCat = productDict[baseBoissonId] || productDict[boissonId] || productNameDict[boissonName] || cleanItem.boisson.category || cleanItem.boisson.category_id || '';
           if (!boissonCat && boissonName) {
-            const found = availableCategories.find(cat => boissonName.includes(cat.toLowerCase().trim()));
+            const normBoissonName = normalizeText(boissonName);
+            const found = availableCategories.find(cat => {
+              const normCat = normalizeText(cat);
+              return normCat && (normBoissonName.includes(normCat) || normCat.includes(normBoissonName));
+            });
             if (found) boissonCat = found;
           }
-          boissonCat = boissonCat.toLowerCase().trim() || 'boissons';
+          const boissonCatNorm = normalizeText(boissonCat) || 'boisson';
           
-          if (dbHiddenCategories.includes(boissonCat) || (normSelectedCats.length > 0 && !normSelectedCats.includes(boissonCat))) {
+          if (normDbHiddenCategories.includes(boissonCatNorm) || (normSelectedCats.length > 0 && !normSelectedCats.includes(boissonCatNorm))) {
             cleanItem.boisson = null; 
           }
         }
@@ -576,12 +597,16 @@ const KDS = () => {
           
           let accCat = productDict[baseAccId] || productDict[accId] || productNameDict[accName] || cleanItem.accompagnement.category || cleanItem.accompagnement.category_id || '';
           if (!accCat && accName) {
-            const found = availableCategories.find(cat => accName.includes(cat.toLowerCase().trim()));
+            const normAccName = normalizeText(accName);
+            const found = availableCategories.find(cat => {
+              const normCat = normalizeText(cat);
+              return normCat && (normAccName.includes(normCat) || normCat.includes(normAccName));
+            });
             if (found) accCat = found;
           }
-          accCat = accCat.toLowerCase().trim() || 'accompagnements';
+          const accCatNorm = normalizeText(accCat) || 'accompagnement';
           
-          if (dbHiddenCategories.includes(accCat) || (normSelectedCats.length > 0 && !normSelectedCats.includes(accCat))) {
+          if (normDbHiddenCategories.includes(accCatNorm) || (normSelectedCats.length > 0 && !normSelectedCats.includes(accCatNorm))) {
             cleanItem.accompagnement = null; 
           }
         }
