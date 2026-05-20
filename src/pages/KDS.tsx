@@ -13,8 +13,6 @@ import {
   X,
   History,
   RotateCcw,
-  ChevronLeft,
-  ChevronRight,
   Volume2,
   VolumeX,
   WifiOff,
@@ -206,7 +204,11 @@ const KDS = () => {
   const [themeColors, setThemeColors] = useState({ primary: '#FBBF24', secondary: '#1e293b' });
 
   const [productDict, setProductDict] = useState<Record<string, string>>({});
+  const [productNameDict, setProductNameDict] = useState<Record<string, string>>({});
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+  
+  const [dbHiddenCategories, setDbHiddenCategories] = useState<string[]>([]);
+
   const [selectedCategories, setSelectedCategories] = useState<string[]>(
     JSON.parse(localStorage.getItem('kds_selected_categories') || '[]')
   );
@@ -303,15 +305,34 @@ const KDS = () => {
   const fetchCatalog = async () => {
     if (!activeRestoId) return;
     try {
-      const { data } = await supabase.from('product').select('id, category').eq('restaurant_id', activeRestoId);
+      const { data: catData } = await supabase
+        .from('categories')
+        .select('name, show_on_kds')
+        .eq('restaurant_id', activeRestoId);
+
+      const hiddenCats: string[] = [];
+      if (catData) {
+        catData.forEach(c => {
+          if (c.show_on_kds === false && c.name) {
+            hiddenCats.push(c.name.toLowerCase().trim());
+          }
+        });
+      }
+      setDbHiddenCategories(hiddenCats);
+
+      // Chargement ID + Nom pour croiser les données pare-balles
+      const { data } = await supabase.from('product').select('id, name, category').eq('restaurant_id', activeRestoId);
       if (data) {
         const dict: Record<string, string> = {};
+        const nameDict: Record<string, string> = {};
         const cats = new Set<string>();
         data.forEach(p => {
           if (p.id) dict[p.id.toString()] = p.category;
+          if (p.name) nameDict[p.name.toLowerCase().trim()] = p.category;
           if (p.category) cats.add(p.category);
         });
         setProductDict(dict);
+        setProductNameDict(nameDict);
         setAvailableCategories(Array.from(cats).sort());
       }
     } catch (e) { console.error("Erreur chargement catalogue", e); }
@@ -417,9 +438,17 @@ const KDS = () => {
       })
       .subscribe();
 
+    const categoriesChannel = supabase
+      .channel(`kds_categories_${activeRestoId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories', filter: `restaurant_id=eq.${activeRestoId}` }, () => {
+        fetchCatalog();
+      })
+      .subscribe();
+
     return () => { 
       supabase.removeChannel(ordersChannel);
       supabase.removeChannel(optionGroupsChannel);
+      supabase.removeChannel(categoriesChannel);
     };
   }, [activeRestoId]);
 
@@ -477,20 +506,88 @@ const KDS = () => {
     }
   };
 
+  // ========================================================================
+  // FILTRAGE AVEC ANALYSE TEXTUELLE INTÉGRÉE POUR PARER LES IDS STANDARDS
+  // ========================================================================
   const displayOrders = useMemo(() => {
     const active = orders.filter(o => isActiveForKDS(o.status));
+    const normSelectedCats = selectedCategories.map(c => c.toLowerCase().trim());
     
     return active.map(order => {
       const allItems = parseOrderDetails(order.order_details);
       
-      let filteredItems = allItems;
-      if (selectedCategories.length > 0) {
-        filteredItems = allItems.filter((item: any) => {
-          const productId = item.product?.id || item.id;
-          const category = productDict[productId?.toString()] || item.product?.category || item.category;
-          return category && selectedCategories.includes(category);
-        });
-      }
+      const filteredItems = allItems.map((item: any) => {
+        if (!item) return null;
+        
+        // 1. Identification de l'ID produit principal
+        const productId = (item.product?.id || item.id || item.product_id || '').toString().trim();
+        const baseProductId = productId.includes('-') ? productId.split('-')[0] : productId;
+        
+        // Normalisation textuelle du nom du produit
+        const itemInternalName = (item.product?.name || item.name || '').toLowerCase().trim();
+        
+        // 2. Détection triple sécurité : ID base -> ID complet -> Nom exact -> Contenu textuel
+        let rawCategory = productDict[baseProductId] || productDict[productId] || productNameDict[itemInternalName] || item.product?.category || item.product?.category_id || item.category || item.category_id || '';
+        
+        // Si la bdd n'a rien donné (mismatch UUID/Int), on cherche si le nom de l'article contient une catégorie connue (ex: "MENU TOAST" contient "TOAST")
+        if (!rawCategory && itemInternalName) {
+          const foundCat = availableCategories.find(cat => {
+            const cNorm = cat.toLowerCase().trim();
+            return itemInternalName.includes(cNorm) || cNorm.includes(itemInternalName);
+          });
+          if (foundCat) rawCategory = foundCat;
+        }
+
+        const mainCategory = rawCategory.toLowerCase().trim();
+
+        // Filtrage BDD (show_on_kds = false)
+        if (dbHiddenCategories.includes(mainCategory)) {
+          return null;
+        }
+
+        // Filtrage manuel (Filtres d'écran)
+        if (normSelectedCats.length > 0 && !normSelectedCats.includes(mainCategory)) {
+          return null;
+        }
+
+        const cleanItem = { ...item };
+
+        if (cleanItem.boisson) {
+          const boissonId = (cleanItem.boisson.id || '').toString().trim();
+          const baseBoissonId = boissonId.includes('-') ? boissonId.split('-')[0] : boissonId;
+          const boissonName = (cleanItem.boisson.name || '').toLowerCase().trim();
+          
+          let boissonCat = productDict[baseBoissonId] || productDict[boissonId] || productNameDict[boissonName] || cleanItem.boisson.category || cleanItem.boisson.category_id || '';
+          if (!boissonCat && boissonName) {
+            const found = availableCategories.find(cat => boissonName.includes(cat.toLowerCase().trim()));
+            if (found) boissonCat = found;
+          }
+          boissonCat = boissonCat.toLowerCase().trim() || 'boissons';
+          
+          if (dbHiddenCategories.includes(boissonCat) || (normSelectedCats.length > 0 && !normSelectedCats.includes(boissonCat))) {
+            cleanItem.boisson = null; 
+          }
+        }
+
+        if (cleanItem.accompagnement) {
+          const accId = (cleanItem.accompagnement.id || '').toString().trim();
+          const baseAccId = accId.includes('-') ? accId.split('-')[0] : accId;
+          const accName = (cleanItem.accompagnement.name || '').toLowerCase().trim();
+          
+          let accCat = productDict[baseAccId] || productDict[accId] || productNameDict[accName] || cleanItem.accompagnement.category || cleanItem.accompagnement.category_id || '';
+          if (!accCat && accName) {
+            const found = availableCategories.find(cat => accName.includes(cat.toLowerCase().trim()));
+            if (found) accCat = found;
+          }
+          accCat = accCat.toLowerCase().trim() || 'accompagnements';
+          
+          if (dbHiddenCategories.includes(accCat) || (normSelectedCats.length > 0 && !normSelectedCats.includes(accCat))) {
+            cleanItem.accompagnement = null; 
+          }
+        }
+
+        return cleanItem;
+      }).filter(Boolean);
 
       const groupedItems: any[] = [];
       filteredItems.forEach((item: any) => {
@@ -516,12 +613,11 @@ const KDS = () => {
       
       let slots = Math.ceil(totalLines / LINES_PER_COLUMN);
       if (slots < 1) slots = 1;
-      
       let displaySlots = slots > 5 ? 5 : slots;
 
       return { ...order, groupedItems, _slots: displaySlots, rawSlots: slots };
     }).filter(order => order.groupedItems.length > 0);
-  }, [orders, selectedCategories, productDict, hiddenOptionNames]);
+  }, [orders, selectedCategories, productDict, productNameDict, hiddenOptionNames, dbHiddenCategories, availableCategories]);
 
   const historyOrders = orders
     .filter(o => !isActiveForKDS(o.status))
@@ -582,7 +678,7 @@ const KDS = () => {
       <div className={`flex justify-between items-center px-2 py-1 2xl:px-4 2xl:py-3 bg-secondary border-b border-black/50 z-10 flex-shrink-0 ${isOffline ? 'mt-6 2xl:mt-10' : ''}`}>
         <div className="flex items-center gap-2 2xl:gap-4">
           <span className="text-[11px] xl:text-sm 2xl:text-xl font-black uppercase tracking-widest text-white/50">
-            {selectedCategories.length > 0 ? "KDS (FILTRÉ)" : "KDS"}
+            {selectedCategories.length > 0 || dbHiddenCategories.length > 0 ? "KDS (FILTRÉ)" : "KDS"}
           </span>
           {!missingIdError && (
             <span className="text-[10px] xl:text-xs 2xl:text-lg font-bold bg-white/10 px-2 py-0.5 2xl:px-3 2xl:py-1 rounded-sm text-white/70">
@@ -641,14 +737,13 @@ const KDS = () => {
               else if (displaySlots === 3) { colSpanClass = "col-span-3"; }
               else if (displaySlots === 2) { colSpanClass = "col-span-2"; }
 
-              // --- MODIFICATION ICI : Couleurs de fond basées sur le order_type_id ---
-              let headerBgClass = 'bg-gray-500'; // Fallback
+              let headerBgClass = 'bg-gray-500'; 
               if (order.order_type_id === ORDER_TYPE_IDS.SUR_PLACE) {
-                headerBgClass = 'bg-orange-500'; // Beau orange
+                headerBgClass = 'bg-orange-500'; 
               } else if (order.order_type_id === ORDER_TYPE_IDS.EMPORTER) {
-                headerBgClass = 'bg-[#b07d50]'; // Marron clair
+                headerBgClass = 'bg-[#b07d50]'; 
               } else if (order.order_type_id === ORDER_TYPE_IDS.LIVRAISON) {
-                headerBgClass = 'bg-blue-400'; // Bleu clair
+                headerBgClass = 'bg-blue-400'; 
               }
 
               let borderClass = isNewOrder ? 'border-2 border-red-500 animate-alert' : 'border-r border-b border-gray-400';
@@ -658,7 +753,6 @@ const KDS = () => {
                   key={order.id} 
                   className={`bg-gray-100 flex flex-col overflow-hidden rounded-none h-[46dvh] ${borderClass} ${colSpanClass}`}
                 >
-                  {/* EN TÊTE DU TICKET (avec la nouvelle couleur) */}
                   <div className={`${headerBgClass} p-1.5 2xl:p-3 flex justify-between items-center border-b border-black/20 flex-shrink-0 z-10`}>
                     <div className="flex items-center gap-1 2xl:gap-2">
                       {isNewOrder && <BellRing className="w-3 h-3 2xl:w-6 2xl:h-6 text-white animate-bounce" />}
@@ -670,7 +764,6 @@ const KDS = () => {
                     </div>
                   </div>
 
-                  {/* CORPS DU TICKET : FRACTIONS STRICTES ET SCROLL ACTIVÉ */}
                   <div 
                     className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar bg-gray-50 p-1"
                     style={{ WebkitOverflowScrolling: 'touch' }}
@@ -711,13 +804,11 @@ const KDS = () => {
                         });
 
                         return chunkArrayByLines(flatLines, LINES_PER_COLUMN).map((columnLines, colIdx) => (
-                          
                           <div 
                             key={`col-${colIdx}`} 
                             className="grid w-full h-full" 
                             style={{ gridTemplateRows: 'repeat(7, minmax(0, 1fr))' }}
                           >
-                            
                             {columnLines.map((line: any, lineIdx: number) => {
                               const isDone = !!doneItems[line.itemKey];
                               const isChunkFirst = lineIdx === 0;
@@ -772,7 +863,6 @@ const KDS = () => {
                     </div>
                   </div>
 
-                  {/* BOUTON D'ACTION RÉDUIT */}
                   <div className="flex-shrink-0 border-t border-gray-300 z-10">
                     {isNewOrder ? (
                       <button onClick={() => acceptOrder(order.id)} className="w-full bg-red-600 hover:bg-red-700 text-white font-black text-[11px] xl:text-sm 2xl:text-xl uppercase tracking-widest py-1.5 2xl:py-3 transition-colors flex justify-center items-center gap-1.5 2xl:gap-3 rounded-none">
@@ -784,7 +874,6 @@ const KDS = () => {
                       </button>
                     )}
                   </div>
-
                 </div>
               );
             })}
@@ -843,6 +932,7 @@ const KDS = () => {
             </div>
 
             <div className="p-4 2xl:p-8 space-y-6 2xl:space-y-12">
+              
               {(!activeRestoId || adminUnlockCount >= 5) && (
                 <div>
                   <label className="block text-[11px] 2xl:text-lg font-bold text-emerald-500 uppercase mb-2 2xl:mb-4">ID du Restaurant</label>
@@ -861,12 +951,13 @@ const KDS = () => {
                 
                 <div className="flex flex-wrap gap-2 2xl:gap-4">
                   {availableCategories.map(cat => (
-                    <button key={cat} onClick={() => toggleCategory(cat)} className={`px-3 py-1.5 2xl:px-6 2xl:py-3 text-[10px] 2xl:text-base font-black uppercase border rounded-none transition-colors ${selectedCategories.includes(cat) ? 'bg-amber-500 text-slate-900 border-amber-500' : 'bg-transparent text-white/70 border-white/20'}`}>
+                    <button key={cat} onClick={() => toggleCategory(cat)} className={`px-3 py-1.5 2xl:px-6 2xl:py-3 text-[10px] 2xl:text-base font-black uppercase border rounded-none transition-colors ${selectedCategories.map(c => c.toLowerCase().trim()).includes(cat.toLowerCase().trim()) ? 'bg-amber-500 text-slate-900 border-amber-500' : 'bg-transparent text-white/70 border-white/20'}`}>
                       {cat}
                     </button>
                   ))}
                 </div>
               </div>
+
             </div>
           </div>
         </div>
