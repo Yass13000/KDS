@@ -70,11 +70,8 @@ const getFormattedOptions = (item: any, hiddenOptionNames: string[] = []) => {
   
   const isHidden = (name: string) => {
     if (!name || typeof name !== 'string') return false;
-    const normalized = name.toLowerCase().trim();
-    return hiddenOptionNames.some(hidden => {
-      const h = hidden.toLowerCase().trim();
-      return normalized === h || normalized === h + 's' || normalized + 's' === h;
-    });
+    const normName = normalizeText(name);
+    return hiddenOptionNames.some(hidden => normalizeText(hidden) === normName);
   };
 
   if (item.isSolo) {
@@ -129,8 +126,7 @@ const getFormattedOptions = (item: any, hiddenOptionNames: string[] = []) => {
   }).filter(o => {
     return o.name 
         && o.name.toLowerCase() !== 'option' 
-        && o.name.toLowerCase() !== 'options' 
-        && !isHidden(o.name);
+        && o.name.toLowerCase() !== 'options';
   });
 
   formattedList.sort((a, b) => a.order - b.order);
@@ -138,13 +134,34 @@ const getFormattedOptions = (item: any, hiddenOptionNames: string[] = []) => {
   const finalOptions: { name: string, qty: number }[] = [];
   
   formattedList.forEach(opt => {
-    let finalName = opt.name === "🍔 VERSION SOLO" ? opt.name : `+ ${opt.name}`;
-    
-    const existing = finalOptions.find(o => o.name === finalName);
-    if (existing) {
-      existing.qty += 1;
+    let finalName = opt.name;
+    let finalQty = 1;
+
+    // Extraction et nettoyage d'un éventuel multiplicateur imbriqué (ex: "2X COMEBACK...")
+    const matchPrefix = finalName.match(/^(\d+)\s*x\s*/i);
+    if (matchPrefix) {
+      finalQty = parseInt(matchPrefix[1], 10);
+      finalName = finalName.replace(/^(\d+)\s*x\s*/i, '').trim();
     } else {
-      finalOptions.push({ name: finalName, qty: 1 });
+      const matchSuffix = finalName.match(/\s*x\s*(\d+)$/i);
+      if (matchSuffix) {
+        finalQty = parseInt(matchSuffix[1], 10);
+        finalName = finalName.replace(/\s*x\s*(\d+)$/i, '').trim();
+      }
+    }
+
+    // Vérification de masquage KDS sur le nom propre nettoyé
+    if (isHidden(finalName)) {
+      return; 
+    }
+
+    let displayName = finalName === "🍔 VERSION SOLO" ? finalName : `+ ${finalName}`;
+    
+    const existing = finalOptions.find(o => o.name === displayName);
+    if (existing) {
+      existing.qty += finalQty;
+    } else {
+      finalOptions.push({ name: displayName, qty: finalQty });
     }
   });
 
