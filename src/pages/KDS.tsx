@@ -1,5 +1,5 @@
 // @ts-nocheck
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { 
@@ -25,6 +25,9 @@ const ORDER_TYPE_IDS = {
   LIVRAISON: 'c48b80a4-0dcd-4f75-9e67-a99d30bf4f9d'
 };
 
+const ALERT_SOUND_URL = "https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg";
+
+// --- LA SOLUTION : 7 LIGNES EXACTES PAR COLONNE ---
 const LINES_PER_COLUMN = 7; 
 
 const chunkArrayByLines = (arr: any[], linesPerCol: number) => {
@@ -36,17 +39,19 @@ const chunkArrayByLines = (arr: any[], linesPerCol: number) => {
   return chunks;
 };
 
+// --- NORMALISATION PARE-BALLES (SINGULIER / PLURIEL / ACCENTS) ---
 const normalizeText = (str: string) => {
   if (!str) return '';
   return str
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") 
-    .replace(/s\b/g, '') 
-    .replace(/[^a-z0-9\s]/g, '') 
+    .replace(/[\u0300-\u036f]/g, "") // Supprime les accents
+    .replace(/s\b/g, '') // Supprime les 's' en fin de mot (ex: menu toasts -> menu toast)
+    .replace(/[^a-z0-9\s]/g, '') // Nettoie les émojis/caractères spéciaux
     .trim();
 };
 
+// --- PARSEUR DE COMMANDES ---
 const parseOrderDetails = (details: any): any[] => {
   if (Array.isArray(details)) return details;
   if (typeof details === 'string') {
@@ -60,19 +65,79 @@ const parseOrderDetails = (details: any): any[] => {
   return [];
 };
 
-const extractOptionsForKDS = (item: any, hiddenOptionNames: string[] = []) => {
+const getFormattedOptions = (item: any, hiddenOptionNames: string[] = []) => {
+  let rawOptions: any[] = [];
+  
   const isHidden = (name: string) => {
     if (!name || typeof name !== 'string') return false;
     const normName = normalizeText(name);
     return hiddenOptionNames.some(hidden => normalizeText(hidden) === normName);
   };
 
+  if (item.isSolo) {
+    rawOptions.push({ name: "🍔 VERSION SOLO", _print_order: -999 });
+  }
+
+  const dynOpts = item.selectedSubOptions || item.selections || item.options || [];
+
+  if (item.boisson) {
+    const boissonName = item.boisson.name || item.boisson;
+    if (!isHidden(boissonName) && !isHidden('boisson')) {
+      rawOptions.push({ name: boissonName, _print_order: -2 });
+    }
+  }
+  
+  if (item.accompagnement) {
+    const accName = item.accompagnement.name || item.accompagnement;
+    if (!isHidden(accName) && !isHidden('accompagnement')) {
+      rawOptions.push({ name: accName, _print_order: -1 });
+    }
+  }
+
+  if (Array.isArray(dynOpts)) {
+    dynOpts.forEach((group: any) => {
+      if (group && group.options && Array.isArray(group.options)) {
+        rawOptions.push(...group.options);
+      } else {
+        rawOptions.push(group);
+      }
+    });
+  } else if (typeof dynOpts === 'object' && dynOpts !== null) {
+    Object.keys(dynOpts).forEach(k => {
+      const val = dynOpts[k];
+      if (Array.isArray(val)) {
+        rawOptions.push(...val);
+      } else {
+        rawOptions.push(val);
+      }
+    });
+  }
+
+  const formattedList = rawOptions.map((opt, i) => {
+    let name = "";
+    let order = opt._print_order !== undefined ? opt._print_order : i;
+
+    if (typeof opt === 'string') {
+      name = opt;
+    } else {
+      name = opt.name || opt.title || opt.variant_name || opt.value || "";
+    }
+    return { name: name.trim(), order };
+  }).filter(o => {
+    return o.name 
+        && o.name.toLowerCase() !== 'option' 
+        && o.name.toLowerCase() !== 'options';
+  });
+
+  formattedList.sort((a, b) => a.order - b.order);
+
   const finalOptions: { name: string, qty: number }[] = [];
+  
+  formattedList.forEach(opt => {
+    let finalName = opt.name;
+    let finalQty = 1;
 
-  const addOption = (rawName: string, defaultQty: number = 1) => {
-    let finalName = rawName.trim();
-    let finalQty = defaultQty;
-
+    // Extraction et nettoyage d'un éventuel multiplicateur imbriqué (ex: "2X COMEBACK...")
     const matchPrefix = finalName.match(/^(\d+)\s*x\s*/i);
     if (matchPrefix) {
       finalQty = parseInt(matchPrefix[1], 10);
@@ -85,7 +150,11 @@ const extractOptionsForKDS = (item: any, hiddenOptionNames: string[] = []) => {
       }
     }
 
-    if (isHidden(finalName)) return; 
+    // Vérification de masquage KDS sur le nom propre nettoyé
+    if (isHidden(finalName)) {
+      return; 
+    }
+
     let displayName = finalName === "🍔 VERSION SOLO" ? finalName : `+ ${finalName}`;
     
     const existing = finalOptions.find(o => o.name === displayName);
@@ -94,51 +163,7 @@ const extractOptionsForKDS = (item: any, hiddenOptionNames: string[] = []) => {
     } else {
       finalOptions.push({ name: displayName, qty: finalQty });
     }
-  };
-
-  if (item.selectedSubOptions && Array.isArray(item.selectedSubOptions)) {
-    if (item.isSolo) addOption("🍔 VERSION SOLO");
-    if (item.boisson && !isHidden('boisson')) addOption(item.boisson.name || item.boisson);
-    if (item.accompagnement && !isHidden('accompagnement')) addOption(item.accompagnement.name || item.accompagnement);
-    
-    item.selectedSubOptions.forEach((opt: any) => {
-      const optName = typeof opt === 'string' ? opt : (opt.name || '');
-      if (optName && optName.toLowerCase() !== 'option' && optName.toLowerCase() !== 'options') {
-        addOption(optName);
-      }
-    });
-  } 
-  else {
-    let rawOptions: any[] = [];
-    const dynOpts = item.selections || item.options || [];
-
-    if (item.isSolo) rawOptions.push({ name: "🍔 VERSION SOLO", _print_order: -999 });
-    if (item.boisson) rawOptions.push({ name: item.boisson.name || item.boisson, _print_order: -2 });
-    if (item.accompagnement) rawOptions.push({ name: item.accompagnement.name || item.accompagnement, _print_order: -1 });
-
-    if (Array.isArray(dynOpts)) {
-      dynOpts.forEach((group: any) => {
-        if (group && group.options && Array.isArray(group.options)) rawOptions.push(...group.options);
-        else rawOptions.push(group);
-      });
-    } else if (typeof dynOpts === 'object' && dynOpts !== null) {
-      Object.keys(dynOpts).forEach(k => {
-        const val = dynOpts[k];
-        if (Array.isArray(val)) rawOptions.push(...val);
-        else rawOptions.push(val);
-      });
-    }
-
-    const formattedList = rawOptions.map((opt, i) => {
-      let name = typeof opt === 'string' ? opt : (opt.name || opt.title || opt.variant_name || opt.value || "");
-      let order = opt._print_order !== undefined ? opt._print_order : i;
-      return { name: name.trim(), order };
-    }).filter(o => o.name && o.name.toLowerCase() !== 'option' && o.name.toLowerCase() !== 'options');
-
-    formattedList.sort((a, b) => a.order - b.order);
-
-    formattedList.forEach(opt => addOption(opt.name));
-  }
+  });
 
   return finalOptions.map(o => o.qty > 1 ? `${o.qty}x ${o.name}` : o.name);
 };
@@ -192,61 +217,11 @@ const OrderTimer = ({ createdAt }: { createdAt: string }) => {
   );
 };
 
-// ============================================================================
-// MOTEUR AUDIO NATIVE (Aucun fichier externe)
-// ============================================================================
-let audioCtx: AudioContext | null = null;
-
-const initAudio = () => {
-  try {
-    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-    if (AudioContext && !audioCtx) {
-      audioCtx = new AudioContext();
-    }
-    if (audioCtx && audioCtx.state === 'suspended') {
-      audioCtx.resume();
-    }
-    return true;
-  } catch (e) {
-    return false;
-  }
-};
-
-const playNativeBeep = () => {
-  if (!audioCtx) return;
-
-  const playTone = (freq: number, startTime: number, duration: number) => {
-    const osc = audioCtx!.createOscillator();
-    const gainNode = audioCtx!.createGain();
-    
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(freq, startTime);
-    
-    gainNode.gain.setValueAtTime(0, startTime);
-    gainNode.gain.linearRampToValueAtTime(1, startTime + 0.05);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
-    
-    osc.connect(gainNode);
-    gainNode.connect(audioCtx!.destination);
-    
-    osc.start(startTime);
-    osc.stop(startTime + duration);
-  };
-
-  const now = audioCtx.currentTime;
-  playTone(800, now, 0.4); 
-  playTone(1200, now + 0.1, 0.6); 
-};
-
 const KDS = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [missingIdError, setMissingIdError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  
-  // Audio state
   const [audioEnabled, setAudioEnabled] = useState(false);
-  const [showAudioUnlock, setShowAudioUnlock] = useState(true);
-
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   
   const [activeRestoId, setActiveRestoId] = useState(localStorage.getItem('pos_restaurant_id') || '');
@@ -269,6 +244,7 @@ const KDS = () => {
   
   const [hiddenOptionNames, setHiddenOptionNames] = useState<string[]>([]);
   const [doneItems, setDoneItems] = useState<Record<string, boolean>>({});
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -309,34 +285,31 @@ const KDS = () => {
     return () => clearInterval(interval);
   }, [activeRestoId]);
 
-  // --- AUDIO ACTIONS ---
+  useEffect(() => {
+    const audio = new Audio(ALERT_SOUND_URL);
+    audio.preload = "auto";
+    audioRef.current = audio;
+  }, []);
+
   const unlockAudio = () => {
-    const success = initAudio();
-    if (success) {
-      setAudioEnabled(true);
-      setShowAudioUnlock(false);
-      playNativeBeep();
-      toast.success("Son activé !");
-    } else {
-      toast.error("Erreur d'initialisation du son natif.");
+    if (audioRef.current && !audioEnabled) {
+      audioRef.current.play().then(() => {
+        audioRef.current?.pause();
+        if (audioRef.current) audioRef.current.currentTime = 0;
+        setAudioEnabled(true);
+      }).catch(() => {});
     }
   };
 
-  const toggleAudioStatus = () => {
-    if (audioEnabled) {
-      setAudioEnabled(false);
-      toast.info("Son coupé");
-    } else {
-      unlockAudio();
+  const playNotificationSound = () => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.play().catch(() => {
+        setAudioEnabled(false);
+        toast.error("Son bloqué par le navigateur. Cliquez sur l'écran.", { icon: <VolumeX className="w-5 h-5 text-red-500" /> });
+      });
     }
   };
-
-  const fireNotification = () => {
-    if (audioEnabled) {
-      playNativeBeep();
-    }
-  };
-  // -----------------------
 
   const fetchTheme = async () => {
     if (!activeRestoId) return;
@@ -475,21 +448,13 @@ const KDS = () => {
     const ordersChannel = supabase
       .channel(`kds_orders_${activeRestoId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `restaurant_id=eq.${activeRestoId}` }, (payload) => {
-        
-        // Suppression Live
-        if (payload.eventType === 'DELETE') {
-           setOrders(prev => prev.filter(o => o.id !== payload.old.id));
-           return;
-        }
-
         fetchOrders();
-        
         if (payload.eventType === 'INSERT') {
-          if (payload.new.status?.toLowerCase() === 'nouvelle' || payload.new.status?.toLowerCase() === 'en cours') fireNotification();
+          if (payload.new.status?.toLowerCase() === 'nouvelle') playNotificationSound();
         } else if (payload.eventType === 'UPDATE') {
           const oldStatus = payload.old?.status?.toLowerCase();
           const newStatus = payload.new?.status?.toLowerCase();
-          if ((newStatus === 'nouvelle' || newStatus === 'en cours') && (oldStatus !== 'nouvelle' && oldStatus !== 'en cours')) fireNotification();
+          if (newStatus === 'nouvelle' && oldStatus !== 'nouvelle') playNotificationSound();
         }
       })
       .subscribe();
@@ -513,7 +478,7 @@ const KDS = () => {
       supabase.removeChannel(optionGroupsChannel);
       supabase.removeChannel(categoriesChannel);
     };
-  }, [activeRestoId, audioEnabled]); // ajout de audioEnabled pour maj fonction fireNotification
+  }, [activeRestoId]);
 
   const acceptOrder = async (orderId: string | number) => {
     try {
@@ -569,6 +534,9 @@ const KDS = () => {
     }
   };
 
+  // ========================================================================
+  // FILTRAGE ROBUSTE AVEC HARMONISATION INTERNE ET COMPATIBILITÉ TEXTUELLE PLURIELS
+  // ========================================================================
   const displayOrders = useMemo(() => {
     const active = orders.filter(o => isActiveForKDS(o.status));
     const normSelectedCats = selectedCategories.map(c => normalizeText(c));
@@ -580,13 +548,17 @@ const KDS = () => {
       const filteredItems = allItems.map((item: any) => {
         if (!item) return null;
         
+        // 1. Identification robuste et nettoyage de l'ID produit (gère "179-loaded-0" -> "179")
         const productId = (item.product?.id || item.id || item.product_id || '').toString().trim();
         const baseProductId = productId.includes('-') ? productId.split('-')[0] : productId;
         
+        // Normalisation textuelle du nom du produit
         const itemInternalName = (item.product?.name || item.name || '').toLowerCase().trim();
         
+        // 2. Détection triple sécurité : ID base -> ID complet -> Nom exact -> Contenu textuel
         let rawCategory = productDict[baseProductId] || productDict[productId] || productNameDict[itemInternalName] || item.product?.category || item.product?.category_id || item.category || item.category_id || '';
         
+        // Fallback textuel intelligent normalisé (gère "menu toasts" vs "menu toast")
         if (!rawCategory && itemInternalName) {
           const normItemName = normalizeText(itemInternalName);
           const foundCat = availableCategories.find(cat => {
@@ -599,12 +571,15 @@ const KDS = () => {
         const mainCategory = rawCategory.toLowerCase().trim();
         const mainCategoryNorm = normalizeText(mainCategory);
 
+        // Si aucune catégorie n'est détectée, on laisse passer le produit pour ne pas le perdre
         if (!mainCategoryNorm) return item;
 
+        // Filtrage BDD (show_on_kds = false)
         if (normDbHiddenCategories.includes(mainCategoryNorm)) {
           return null;
         }
 
+        // Filtrage d'écran tactile manuel
         if (normSelectedCats.length > 0 && !normSelectedCats.includes(mainCategoryNorm)) {
           return null;
         }
@@ -661,7 +636,7 @@ const KDS = () => {
         const productName = item.product?.name || item.name || 'Produit inconnu';
         const qty = item.quantity || 1;
         
-        const options = extractOptionsForKDS(item, hiddenOptionNames);
+        const options = getFormattedOptions(item, hiddenOptionNames);
         const sig = `${productName}|${options.join('|')}`;
         
         const existing = groupedItems.find(g => g.sig === sig);
@@ -699,16 +674,18 @@ const KDS = () => {
       return timeB - timeA;
     });
 
-  const toggleItemDone = (lineId: string) => {
+  const toggleItemDone = (orderId: string, itemSig: string) => {
+    const key = `${orderId}-${itemSig}`;
     setDoneItems(prev => ({
       ...prev,
-      [lineId]: !prev[lineId]
+      [key]: !prev[key]
     }));
   };
 
   return (
     <div 
       className="h-[100dvh] w-full bg-secondary text-white font-helvetica flex flex-col overflow-hidden relative" 
+      onClick={unlockAudio}
       style={{
         '--theme-primary': themeColors.primary,
         '--theme-secondary': themeColors.secondary,
@@ -732,16 +709,6 @@ const KDS = () => {
           .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(100, 100, 100, 0.8); }
         `}
       </style>
-
-      {/* BOUTON FLOTTANT DE SECOURS POUR ACTIVER LE SON */}
-      {showAudioUnlock && !missingIdError && (
-        <button 
-          onClick={unlockAudio} 
-          className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-full font-black animate-bounce shadow-xl z-50 flex items-center gap-3 border-2 border-white cursor-pointer"
-        >
-          <VolumeX size={24} /> CLIQUEZ ICI POUR ACTIVER LE SON
-        </button>
-      )}
 
       {isOffline && (
         <div className="absolute top-0 left-0 right-0 bg-red-600 text-white text-center py-1 2xl:py-2 font-black uppercase tracking-widest text-[10px] 2xl:text-base flex justify-center items-center gap-1.5 z-50 animate-pulse">
@@ -770,7 +737,7 @@ const KDS = () => {
             )}
           </button>
 
-          <button onClick={toggleAudioStatus} className={`p-1.5 2xl:p-3 rounded ml-1 2xl:ml-3 cursor-pointer ${audioEnabled ? 'bg-emerald-500/10' : 'bg-red-500/10 animate-pulse'}`} title="Son">
+          <button onClick={unlockAudio} className={`p-1.5 2xl:p-3 rounded ml-1 2xl:ml-3 ${audioEnabled ? 'bg-emerald-500/10' : 'bg-red-500/10 animate-pulse'}`} title="Son">
             {audioEnabled ? <Volume2 className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" /> : <VolumeX className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" />}
           </button>
         </div>
@@ -885,7 +852,7 @@ const KDS = () => {
                             style={{ gridTemplateRows: 'repeat(7, minmax(0, 1fr))' }}
                           >
                             {columnLines.map((line: any, lineIdx: number) => {
-                              const isDone = !!doneItems[line.id];
+                              const isDone = !!doneItems[line.itemKey];
                               const isChunkFirst = lineIdx === 0;
                               const isChunkLast = lineIdx === columnLines.length - 1;
 
@@ -893,7 +860,7 @@ const KDS = () => {
                                 return (
                                   <div 
                                     key={line.id}
-                                    onClick={() => toggleItemDone(line.id)}
+                                    onClick={() => toggleItemDone(order.id, line.sig)}
                                     className={`min-h-0 w-full overflow-hidden flex items-center px-1.5 2xl:px-3 cursor-pointer transition-colors border-x border-gray-300 ${isChunkFirst ? 'border-t rounded-t-sm' : ''} ${(!line.hasOptions || isChunkLast) ? 'border-b rounded-b-sm shadow-sm' : 'border-b border-gray-200'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
                                   >
                                     <span className={`px-1 py-px 2xl:px-2 2xl:py-0.5 rounded-sm text-[10px] xl:text-[12px] 2xl:text-[18px] font-black mr-1 2xl:mr-2 flex-shrink-0 ${isDone ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-white'}`}>
@@ -922,7 +889,7 @@ const KDS = () => {
                                 return (
                                   <div 
                                     key={line.id} 
-                                    onClick={() => toggleItemDone(line.id)}
+                                    onClick={() => toggleItemDone(order.id, line.sig)}
                                     className={`min-h-0 w-full overflow-hidden flex items-center px-1.5 2xl:px-3 cursor-pointer transition-colors border-x border-gray-300 ${bgClass} ${isChunkFirst ? 'border-t rounded-t-sm' : ''} ${isChunkLast ? 'border-b rounded-b-sm shadow-sm' : 'border-b border-white/10'}`}
                                   >
                                     <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black uppercase leading-tight truncate ${textClass}`}>
