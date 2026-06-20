@@ -1,6 +1,6 @@
 import { useEffect, lazy, Suspense } from 'react';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { HashRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from 'sonner'; // Import direct au lieu du dossier UI
 
 import { StatusBar } from '@capacitor/status-bar';
@@ -46,7 +46,7 @@ const App = () => {
         
         
         <div className="flex-1 flex flex-col w-full relative">
-          <BrowserRouter>
+          <Router>
             <Suspense fallback={<PageLoader />}>
               <Routes>
                 {/* Redirection vers le KDS */}
@@ -59,7 +59,7 @@ const App = () => {
                 <Route path="*" element={<Navigate to="/kds" replace />} />
               </Routes>
             </Suspense>
-          </BrowserRouter>
+          </Router>
         </div>
         
       </main>
