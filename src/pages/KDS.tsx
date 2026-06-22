@@ -25,9 +25,6 @@ const ORDER_TYPE_IDS = {
   LIVRAISON: 'c48b80a4-0dcd-4f75-9e67-a99d30bf4f9d'
 };
 
-const ALERT_SOUND_URL = "https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg";
-
-// --- LA SOLUTION : 7 LIGNES EXACTES PAR COLONNE ---
 const LINES_PER_COLUMN = 7; 
 
 const chunkArrayByLines = (arr: any[], linesPerCol: number) => {
@@ -39,19 +36,17 @@ const chunkArrayByLines = (arr: any[], linesPerCol: number) => {
   return chunks;
 };
 
-// --- NORMALISATION PARE-BALLES (SINGULIER / PLURIEL / ACCENTS) ---
 const normalizeText = (str: string) => {
   if (!str) return '';
   return str
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // Supprime les accents
-    .replace(/s\b/g, '') // Supprime les 's' en fin de mot (ex: menu toasts -> menu toast)
-    .replace(/[^a-z0-9\s]/g, '') // Nettoie les émojis/caractères spéciaux
+    .replace(/[\u0300-\u036f]/g, "") 
+    .replace(/s\b/g, '') 
+    .replace(/[^a-z0-9\s]/g, '') 
     .trim();
 };
 
-// --- PARSEUR DE COMMANDES ---
 const parseOrderDetails = (details: any): any[] => {
   if (Array.isArray(details)) return details;
   if (typeof details === 'string') {
@@ -65,79 +60,20 @@ const parseOrderDetails = (details: any): any[] => {
   return [];
 };
 
-const getFormattedOptions = (item: any, hiddenOptionNames: string[] = []) => {
-  let rawOptions: any[] = [];
-  
+const extractOptionsForKDS = (item: any, hiddenOptionNames: string[] = []) => {
   const isHidden = (name: string) => {
     if (!name || typeof name !== 'string') return false;
     const normName = normalizeText(name);
     return hiddenOptionNames.some(hidden => normalizeText(hidden) === normName);
   };
 
-  if (item.isSolo) {
-    rawOptions.push({ name: "🍔 VERSION SOLO", _print_order: -999 });
-  }
-
-  const dynOpts = item.selectedSubOptions || item.selections || item.options || [];
-
-  if (item.boisson) {
-    const boissonName = item.boisson.name || item.boisson;
-    if (!isHidden(boissonName) && !isHidden('boisson')) {
-      rawOptions.push({ name: boissonName, _print_order: -2 });
-    }
-  }
-  
-  if (item.accompagnement) {
-    const accName = item.accompagnement.name || item.accompagnement;
-    if (!isHidden(accName) && !isHidden('accompagnement')) {
-      rawOptions.push({ name: accName, _print_order: -1 });
-    }
-  }
-
-  if (Array.isArray(dynOpts)) {
-    dynOpts.forEach((group: any) => {
-      if (group && group.options && Array.isArray(group.options)) {
-        rawOptions.push(...group.options);
-      } else {
-        rawOptions.push(group);
-      }
-    });
-  } else if (typeof dynOpts === 'object' && dynOpts !== null) {
-    Object.keys(dynOpts).forEach(k => {
-      const val = dynOpts[k];
-      if (Array.isArray(val)) {
-        rawOptions.push(...val);
-      } else {
-        rawOptions.push(val);
-      }
-    });
-  }
-
-  const formattedList = rawOptions.map((opt, i) => {
-    let name = "";
-    let order = opt._print_order !== undefined ? opt._print_order : i;
-
-    if (typeof opt === 'string') {
-      name = opt;
-    } else {
-      name = opt.name || opt.title || opt.variant_name || opt.value || "";
-    }
-    return { name: name.trim(), order };
-  }).filter(o => {
-    return o.name 
-        && o.name.toLowerCase() !== 'option' 
-        && o.name.toLowerCase() !== 'options';
-  });
-
-  formattedList.sort((a, b) => a.order - b.order);
-
   const finalOptions: { name: string, qty: number }[] = [];
-  
-  formattedList.forEach(opt => {
-    let finalName = opt.name;
-    let finalQty = 1;
 
-    // Extraction et nettoyage d'un éventuel multiplicateur imbriqué (ex: "2X COMEBACK...")
+  const addOption = (rawName: string, defaultQty: number = 1) => {
+    if (!rawName) return;
+    let finalName = rawName.replace(/^-/, '').trim();
+    let finalQty = defaultQty;
+
     const matchPrefix = finalName.match(/^(\d+)\s*x\s*/i);
     if (matchPrefix) {
       finalQty = parseInt(matchPrefix[1], 10);
@@ -150,11 +86,7 @@ const getFormattedOptions = (item: any, hiddenOptionNames: string[] = []) => {
       }
     }
 
-    // Vérification de masquage KDS sur le nom propre nettoyé
-    if (isHidden(finalName)) {
-      return; 
-    }
-
+    if (isHidden(finalName)) return; 
     let displayName = finalName === "🍔 VERSION SOLO" ? finalName : `+ ${finalName}`;
     
     const existing = finalOptions.find(o => o.name === displayName);
@@ -163,7 +95,38 @@ const getFormattedOptions = (item: any, hiddenOptionNames: string[] = []) => {
     } else {
       finalOptions.push({ name: displayName, qty: finalQty });
     }
-  });
+  };
+
+  if (item.isSolo) addOption("🍔 VERSION SOLO");
+  if (item.boisson && !isHidden('boisson')) addOption(item.boisson.name || item.boisson);
+  if (item.accompagnement && !isHidden('accompagnement')) addOption(item.accompagnement.name || item.accompagnement);
+
+  let rawOptions: any[] = [];
+  const dynOpts = item.selectedSubOptions || item.selections || item.options || [];
+
+  if (Array.isArray(dynOpts)) {
+    dynOpts.forEach((group: any) => {
+      if (group && group.options && Array.isArray(group.options)) {
+        rawOptions.push(...group.options);
+      } else {
+        rawOptions.push(group);
+      }
+    });
+  } else if (typeof dynOpts === 'object' && dynOpts !== null) {
+    Object.values(dynOpts).forEach((val: any) => {
+      if (Array.isArray(val)) rawOptions.push(...val);
+      else rawOptions.push(val);
+    });
+  }
+
+  const formattedList = rawOptions.map((opt, i) => {
+    let name = typeof opt === 'string' ? opt : (opt.name || opt.title || opt.variant_name || opt.value || "");
+    let order = (opt._print_order !== undefined) ? opt._print_order : ((opt.print_order !== undefined) ? opt.print_order : i);
+    return { name: name.trim(), order };
+  }).filter(o => o.name && o.name.toLowerCase() !== 'option' && o.name.toLowerCase() !== 'options');
+
+  formattedList.sort((a, b) => a.order - b.order);
+  formattedList.forEach(opt => addOption(opt.name));
 
   return finalOptions.map(o => o.qty > 1 ? `${o.qty}x ${o.name}` : o.name);
 };
@@ -221,7 +184,10 @@ const KDS = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [missingIdError, setMissingIdError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  
   const [audioEnabled, setAudioEnabled] = useState(false);
+  const [showAudioUnlock, setShowAudioUnlock] = useState(true);
+
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   
   const [activeRestoId, setActiveRestoId] = useState(localStorage.getItem('pos_restaurant_id') || '');
@@ -244,7 +210,42 @@ const KDS = () => {
   
   const [hiddenOptionNames, setHiddenOptionNames] = useState<string[]>([]);
   const [doneItems, setDoneItems] = useState<Record<string, boolean>>({});
+
+  // 👇 GESTION DU SON VIA RÉFÉRENCE POUR LE MODE EN BOUCLE CONTINUE
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const startLoopingSound = () => {
+    if (!audioEnabled) return;
+    try {
+      if (!audioRef.current) {
+        audioRef.current = new Audio('/son.mp3');
+        audioRef.current.volume = 1.0;
+        audioRef.current.loop = true; // Active la boucle infinie native
+      }
+      if (audioRef.current.paused) {
+        audioRef.current.play().catch(e => console.error("Erreur lecture audio", e));
+      }
+    } catch (error) {
+      console.error("Impossible de lancer le son en boucle", error);
+    }
+  };
+
+  const stopLoopingSound = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0; // Remet la lecture au début
+    }
+  };
+
+  // 👇 EFFET ANALYSEUR : S'active ou se coupe s'il reste des commandes au statut "Nouvelle"
+  useEffect(() => {
+    const hasNewOrders = orders.some(o => o.status?.toLowerCase() === 'nouvelle');
+    if (hasNewOrders && audioEnabled) {
+      startLoopingSound();
+    } else {
+      stopLoopingSound();
+    }
+  }, [orders, audioEnabled]);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -285,29 +286,21 @@ const KDS = () => {
     return () => clearInterval(interval);
   }, [activeRestoId]);
 
-  useEffect(() => {
-    const audio = new Audio(ALERT_SOUND_URL);
-    audio.preload = "auto";
-    audioRef.current = audio;
-  }, []);
-
   const unlockAudio = () => {
-    if (audioRef.current && !audioEnabled) {
-      audioRef.current.play().then(() => {
-        audioRef.current?.pause();
-        if (audioRef.current) audioRef.current.currentTime = 0;
-        setAudioEnabled(true);
-      }).catch(() => {});
-    }
+    setAudioEnabled(true);
+    setShowAudioUnlock(false);
+    toast.success("Son activé !");
   };
 
-  const playNotificationSound = () => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = 0;
-      audioRef.current.play().catch(() => {
-        setAudioEnabled(false);
-        toast.error("Son bloqué par le navigateur. Cliquez sur l'écran.", { icon: <VolumeX className="w-5 h-5 text-red-500" /> });
-      });
+  const toggleAudioStatus = () => {
+    if (audioEnabled) {
+      setAudioEnabled(false);
+      stopLoopingSound();
+      toast.info("Son coupé");
+    } else {
+      setAudioEnabled(true);
+      setShowAudioUnlock(false);
+      toast.success("Son activé !");
     }
   };
 
@@ -448,14 +441,13 @@ const KDS = () => {
     const ordersChannel = supabase
       .channel(`kds_orders_${activeRestoId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `restaurant_id=eq.${activeRestoId}` }, (payload) => {
-        fetchOrders();
-        if (payload.eventType === 'INSERT') {
-          if (payload.new.status?.toLowerCase() === 'nouvelle') playNotificationSound();
-        } else if (payload.eventType === 'UPDATE') {
-          const oldStatus = payload.old?.status?.toLowerCase();
-          const newStatus = payload.new?.status?.toLowerCase();
-          if (newStatus === 'nouvelle' && oldStatus !== 'nouvelle') playNotificationSound();
+        
+        if (payload.eventType === 'DELETE') {
+           setOrders(prev => prev.filter(o => o.id !== payload.old.id));
+           return;
         }
+
+        fetchOrders();
       })
       .subscribe();
 
@@ -478,7 +470,7 @@ const KDS = () => {
       supabase.removeChannel(optionGroupsChannel);
       supabase.removeChannel(categoriesChannel);
     };
-  }, [activeRestoId]);
+  }, [activeRestoId, audioEnabled]);
 
   const acceptOrder = async (orderId: string | number) => {
     try {
@@ -534,9 +526,6 @@ const KDS = () => {
     }
   };
 
-  // ========================================================================
-  // FILTRAGE ROBUSTE AVEC HARMONISATION INTERNE ET COMPATIBILITÉ TEXTUELLE PLURIELS
-  // ========================================================================
   const displayOrders = useMemo(() => {
     const active = orders.filter(o => isActiveForKDS(o.status));
     const normSelectedCats = selectedCategories.map(c => normalizeText(c));
@@ -548,17 +537,13 @@ const KDS = () => {
       const filteredItems = allItems.map((item: any) => {
         if (!item) return null;
         
-        // 1. Identification robuste et nettoyage de l'ID produit (gère "179-loaded-0" -> "179")
         const productId = (item.product?.id || item.id || item.product_id || '').toString().trim();
         const baseProductId = productId.includes('-') ? productId.split('-')[0] : productId;
         
-        // Normalisation textuelle du nom du produit
         const itemInternalName = (item.product?.name || item.name || '').toLowerCase().trim();
         
-        // 2. Détection triple sécurité : ID base -> ID complet -> Nom exact -> Contenu textuel
         let rawCategory = productDict[baseProductId] || productDict[productId] || productNameDict[itemInternalName] || item.product?.category || item.product?.category_id || item.category || item.category_id || '';
         
-        // Fallback textuel intelligent normalisé (gère "menu toasts" vs "menu toast")
         if (!rawCategory && itemInternalName) {
           const normItemName = normalizeText(itemInternalName);
           const foundCat = availableCategories.find(cat => {
@@ -571,18 +556,9 @@ const KDS = () => {
         const mainCategory = rawCategory.toLowerCase().trim();
         const mainCategoryNorm = normalizeText(mainCategory);
 
-        // Si aucune catégorie n'est détectée, on laisse passer le produit pour ne pas le perdre
         if (!mainCategoryNorm) return item;
-
-        // Filtrage BDD (show_on_kds = false)
-        if (normDbHiddenCategories.includes(mainCategoryNorm)) {
-          return null;
-        }
-
-        // Filtrage d'écran tactile manuel
-        if (normSelectedCats.length > 0 && !normSelectedCats.includes(mainCategoryNorm)) {
-          return null;
-        }
+        if (normDbHiddenCategories.includes(mainCategoryNorm)) return null;
+        if (normSelectedCats.length > 0 && !normSelectedCats.includes(mainCategoryNorm)) return null;
 
         const cleanItem = { ...item };
 
@@ -636,7 +612,7 @@ const KDS = () => {
         const productName = item.product?.name || item.name || 'Produit inconnu';
         const qty = item.quantity || 1;
         
-        const options = getFormattedOptions(item, hiddenOptionNames);
+        const options = extractOptionsForKDS(item, hiddenOptionNames);
         const sig = `${productName}|${options.join('|')}`;
         
         const existing = groupedItems.find(g => g.sig === sig);
@@ -674,18 +650,16 @@ const KDS = () => {
       return timeB - timeA;
     });
 
-  const toggleItemDone = (orderId: string, itemSig: string) => {
-    const key = `${orderId}-${itemSig}`;
+  const toggleItemDone = (lineId: string) => {
     setDoneItems(prev => ({
       ...prev,
-      [key]: !prev[key]
+      [lineId]: !prev[lineId]
     }));
   };
 
   return (
     <div 
       className="h-[100dvh] w-full bg-secondary text-white font-helvetica flex flex-col overflow-hidden relative" 
-      onClick={unlockAudio}
       style={{
         '--theme-primary': themeColors.primary,
         '--theme-secondary': themeColors.secondary,
@@ -710,13 +684,21 @@ const KDS = () => {
         `}
       </style>
 
+      {showAudioUnlock && !missingIdError && (
+        <button 
+          onClick={unlockAudio} 
+          className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-full font-black animate-bounce shadow-xl z-50 flex items-center gap-3 border-2 border-white cursor-pointer"
+        >
+          <VolumeX size={24} /> CLIQUEZ ICI POUR ACTIVER LE SON
+        </button>
+      )}
+
       {isOffline && (
         <div className="absolute top-0 left-0 right-0 bg-red-600 text-white text-center py-1 2xl:py-2 font-black uppercase tracking-widest text-[10px] 2xl:text-base flex justify-center items-center gap-1.5 z-50 animate-pulse">
           <WifiOff className="w-3 h-3 2xl:w-5 2xl:h-5" /> Hors ligne ! KDS non synchronisé.
         </div>
       )}
 
-      {/* HEADER ADAPTATIF */}
       <div className={`flex justify-between items-center px-2 py-1 2xl:px-4 2xl:py-3 bg-secondary border-b border-black/50 z-10 flex-shrink-0 ${isOffline ? 'mt-6 2xl:mt-10' : ''}`}>
         <div className="flex items-center gap-2 2xl:gap-4">
           <span className="text-[11px] xl:text-sm 2xl:text-xl font-black uppercase tracking-widest text-white/50">
@@ -737,7 +719,7 @@ const KDS = () => {
             )}
           </button>
 
-          <button onClick={unlockAudio} className={`p-1.5 2xl:p-3 rounded ml-1 2xl:ml-3 ${audioEnabled ? 'bg-emerald-500/10' : 'bg-red-500/10 animate-pulse'}`} title="Son">
+          <button onClick={toggleAudioStatus} className={`p-1.5 2xl:p-3 rounded ml-1 2xl:ml-3 cursor-pointer ${audioEnabled ? 'bg-emerald-500/10' : 'bg-red-500/10 animate-pulse'}`} title="Son">
             {audioEnabled ? <Volume2 className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" /> : <VolumeX className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" />}
           </button>
         </div>
@@ -852,7 +834,7 @@ const KDS = () => {
                             style={{ gridTemplateRows: 'repeat(7, minmax(0, 1fr))' }}
                           >
                             {columnLines.map((line: any, lineIdx: number) => {
-                              const isDone = !!doneItems[line.itemKey];
+                              const isDone = !!doneItems[line.id];
                               const isChunkFirst = lineIdx === 0;
                               const isChunkLast = lineIdx === columnLines.length - 1;
 
@@ -860,7 +842,7 @@ const KDS = () => {
                                 return (
                                   <div 
                                     key={line.id}
-                                    onClick={() => toggleItemDone(order.id, line.sig)}
+                                    onClick={() => toggleItemDone(line.id)}
                                     className={`min-h-0 w-full overflow-hidden flex items-center px-1.5 2xl:px-3 cursor-pointer transition-colors border-x border-gray-300 ${isChunkFirst ? 'border-t rounded-t-sm' : ''} ${(!line.hasOptions || isChunkLast) ? 'border-b rounded-b-sm shadow-sm' : 'border-b border-gray-200'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
                                   >
                                     <span className={`px-1 py-px 2xl:px-2 2xl:py-0.5 rounded-sm text-[10px] xl:text-[12px] 2xl:text-[18px] font-black mr-1 2xl:mr-2 flex-shrink-0 ${isDone ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-white'}`}>
@@ -889,7 +871,7 @@ const KDS = () => {
                                 return (
                                   <div 
                                     key={line.id} 
-                                    onClick={() => toggleItemDone(order.id, line.sig)}
+                                    onClick={() => toggleItemDone(line.id)}
                                     className={`min-h-0 w-full overflow-hidden flex items-center px-1.5 2xl:px-3 cursor-pointer transition-colors border-x border-gray-300 ${bgClass} ${isChunkFirst ? 'border-t rounded-t-sm' : ''} ${isChunkLast ? 'border-b rounded-b-sm shadow-sm' : 'border-b border-white/10'}`}
                                   >
                                     <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black uppercase leading-tight truncate ${textClass}`}>
