@@ -91,6 +91,8 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react-swc": "^3.5.0",
     "autoprefixer": "^10.4.20",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.9.0",
     "eslint-plugin-react-hooks": "^5.1.0-rc.0",
     "eslint-plugin-react-refresh": "^0.4.9",
@@ -126,7 +128,6 @@
           ]
         }
       ],
-      "icon": "build/icon.ico",
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "mac": {
@@ -134,7 +135,6 @@
         "dmg",
         "zip"
       ],
-      "icon": "build/icon.icns",
       "category": "public.app-category.business"
     },
     "linux": {
@@ -142,7 +142,6 @@
         "AppImage",
         "deb"
       ],
-      "icon": "build/icon.png",
       "category": "Office"
     },
     "nsis": {
@@ -150,10 +149,6 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico",
-      "installerHeaderIcon": "build/icon.ico",
-      "license": "LICENSE.txt",
       "runAfterFinish": true,
       "shortcutName": "Borne Kiosk"
     }

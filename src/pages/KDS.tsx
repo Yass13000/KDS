@@ -16,8 +16,10 @@ import {
   Volume2,
   VolumeX,
   WifiOff,
-  Filter
+  Filter,
+  LayoutGrid
 } from 'lucide-react';
+import { getFormattedOrderOptions, fetchOptionGroupMapping } from '@/lib/orderFormatter';
 
 const ORDER_TYPE_IDS = {
   SUR_PLACE: '633425b1-f86c-4c17-8cba-b258906ad317',
@@ -42,7 +44,6 @@ const normalizeText = (str: string) => {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "") 
-    .replace(/s\b/g, '') 
     .replace(/[^a-z0-9\s]/g, '') 
     .trim();
 };
@@ -60,75 +61,92 @@ const parseOrderDetails = (details: any): any[] => {
   return [];
 };
 
-const extractOptionsForKDS = (item: any, hiddenOptionNames: string[] = []) => {
+// 🟢 Extraction propre basée sur orderFormatter.ts avec groupement par groupe d'options
+const extractOptionLinesForKDS = (
+  item: any, 
+  hiddenOptionNames: string[] = [], 
+  groupMapping: Record<string, string> = {},
+  groupInline: boolean = true
+) => {
   const isHidden = (name: string) => {
     if (!name || typeof name !== 'string') return false;
     const normName = normalizeText(name);
-    return hiddenOptionNames.some(hidden => normalizeText(hidden) === normName);
-  };
-
-  const finalOptions: { name: string, qty: number }[] = [];
-
-  const addOption = (rawName: string, defaultQty: number = 1) => {
-    if (!rawName) return;
-    let finalName = rawName.replace(/^-/, '').trim();
-    let finalQty = defaultQty;
-
-    const matchPrefix = finalName.match(/^(\d+)\s*x\s*/i);
-    if (matchPrefix) {
-      finalQty = parseInt(matchPrefix[1], 10);
-      finalName = finalName.replace(/^(\d+)\s*x\s*/i, '').trim();
-    } else {
-      const matchSuffix = finalName.match(/\s*x\s*(\d+)$/i);
-      if (matchSuffix) {
-        finalQty = parseInt(matchSuffix[1], 10);
-        finalName = finalName.replace(/\s*x\s*(\d+)$/i, '').trim();
-      }
-    }
-
-    if (isHidden(finalName)) return; 
-    let displayName = finalName === "🍔 VERSION SOLO" ? finalName : `+ ${finalName}`;
-    
-    const existing = finalOptions.find(o => o.name === displayName);
-    if (existing) {
-      existing.qty += finalQty;
-    } else {
-      finalOptions.push({ name: displayName, qty: finalQty });
-    }
-  };
-
-  if (item.isSolo) addOption("🍔 VERSION SOLO");
-  if (item.boisson && !isHidden('boisson')) addOption(item.boisson.name || item.boisson);
-  if (item.accompagnement && !isHidden('accompagnement')) addOption(item.accompagnement.name || item.accompagnement);
-
-  let rawOptions: any[] = [];
-  const dynOpts = item.selectedSubOptions || item.selections || item.options || [];
-
-  if (Array.isArray(dynOpts)) {
-    dynOpts.forEach((group: any) => {
-      if (group && group.options && Array.isArray(group.options)) {
-        rawOptions.push(...group.options);
-      } else {
-        rawOptions.push(group);
-      }
+    if (!normName) return false;
+    return hiddenOptionNames.some(hidden => {
+      const normHidden = normalizeText(hidden);
+      return normHidden && (normName === normHidden || normName.replace(/^sans\s+/, '') === normHidden);
     });
-  } else if (typeof dynOpts === 'object' && dynOpts !== null) {
-    Object.values(dynOpts).forEach((val: any) => {
-      if (Array.isArray(val)) rawOptions.push(...val);
-      else rawOptions.push(val);
+  };
+
+  const resultRows: { items: { name: string; qty: number; isSans: boolean }[]; isSans: boolean }[] = [];
+
+  // 1. Version Solo
+  if (item.isSolo) {
+    resultRows.push({
+      items: [{ name: "🍔 VERSION SOLO", qty: 1, isSans: false }],
+      isSans: false
     });
   }
 
-  const formattedList = rawOptions.map((opt, i) => {
-    let name = typeof opt === 'string' ? opt : (opt.name || opt.title || opt.variant_name || opt.value || "");
-    let order = (opt._print_order !== undefined) ? opt._print_order : ((opt.print_order !== undefined) ? opt.print_order : i);
-    return { name: name.trim(), order };
-  }).filter(o => o.name && o.name.toLowerCase() !== 'option' && o.name.toLowerCase() !== 'options');
+  // 2. Récupération unifiée via getFormattedOrderOptions
+  const optionGroups = getFormattedOrderOptions(item, groupMapping);
 
-  formattedList.sort((a, b) => a.order - b.order);
-  formattedList.forEach(opt => addOption(opt.name));
+  const sansItems: { name: string; qty: number; isSans: boolean }[] = [];
+  const normalGroups: { groupName: string; items: { name: string; qty: number; isSans: boolean }[] }[] = [];
 
-  return finalOptions.map(o => o.qty > 1 ? `${o.qty}x ${o.name}` : o.name);
+  optionGroups.forEach(grp => {
+    if ((grp.originalGroupName && isHidden(grp.originalGroupName)) || (grp.groupName && isHidden(grp.groupName))) {
+      return;
+    }
+
+    const validItems = (grp.items || []).filter(opt => opt && opt.name && !isHidden(opt.name));
+    if (validItems.length === 0) return;
+
+    // Isoler les ingrédients retirés (catégorie INGRÉDIENTS ou isSans)
+    validItems.forEach(opt => {
+      if (opt.isSans || grp.originalGroupName === 'INGRÉDIENTS') {
+        sansItems.push({ name: opt.name, qty: opt.qty || 1, isSans: true });
+      }
+    });
+
+    // Isoler les options normales par groupe
+    const nonSansItems = validItems.filter(opt => !opt.isSans && grp.originalGroupName !== 'INGRÉDIENTS');
+    if (nonSansItems.length > 0) {
+      normalGroups.push({
+        groupName: grp.originalGroupName || grp.groupName || '',
+        items: nonSansItems.map(opt => ({ name: opt.name, qty: opt.qty || 1, isSans: false }))
+      });
+    }
+  });
+
+  // Affichage des "SANS ..." en ROUGE
+  if (sansItems.length > 0) {
+    if (groupInline) {
+      for (let i = 0; i < sansItems.length; i += 2) {
+        resultRows.push({ items: sansItems.slice(i, i + 2), isSans: true });
+      }
+    } else {
+      sansItems.forEach(opt => {
+        resultRows.push({ items: [opt], isSans: true });
+      });
+    }
+  }
+
+  // Affichage des options normales par groupe
+  normalGroups.forEach(grp => {
+    if (groupInline) {
+      // Les options du même groupe s'affichent ensemble sur la même ligne (par blocs de 2-3 max)
+      for (let i = 0; i < grp.items.length; i += 3) {
+        resultRows.push({ items: grp.items.slice(i, i + 3), isSans: false });
+      }
+    } else {
+      grp.items.forEach(opt => {
+        resultRows.push({ items: [opt], isSans: false });
+      });
+    }
+  });
+
+  return resultRows;
 };
 
 const isActiveForKDS = (status: string) => {
@@ -153,13 +171,7 @@ const HeaderClock = () => {
   );
 };
 
-const OrderTimer = ({ createdAt }: { createdAt: string }) => {
-  const [now, setNow] = useState(new Date());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
+const OrderTimer = ({ createdAt, now }: { createdAt: string; now: Date }) => {
   const created = new Date(createdAt).getTime();
   const diffSeconds = Math.max(0, Math.floor((now.getTime() - created) / 1000));
   const minutes = Math.floor(diffSeconds / 60);
@@ -181,6 +193,13 @@ const OrderTimer = ({ createdAt }: { createdAt: string }) => {
 };
 
 const KDS = () => {
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const [orders, setOrders] = useState<any[]>([]);
   const [missingIdError, setMissingIdError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -196,6 +215,11 @@ const KDS = () => {
   const [tempRestoId, setTempRestoId] = useState(activeRestoId);
   const [adminUnlockCount, setAdminUnlockCount] = useState(0);
 
+  // 🟢 Option pour grouper les options sur la même ligne (Activé par défaut)
+  const [groupOptionsInline, setGroupOptionsInline] = useState<boolean>(() => {
+    return localStorage.getItem('kds_group_options_inline') !== 'false';
+  });
+
   const [themeColors, setThemeColors] = useState({ primary: '#FBBF24', secondary: '#1e293b' });
 
   const [productDict, setProductDict] = useState<Record<string, string>>({});
@@ -210,9 +234,19 @@ const KDS = () => {
   
   const [hiddenOptionNames, setHiddenOptionNames] = useState<string[]>([]);
   const [doneItems, setDoneItems] = useState<Record<string, boolean>>({});
+  const [optionGroupMapping, setOptionGroupMapping] = useState<Record<string, string>>({});
 
-  // 👇 GESTION DU SON VIA RÉFÉRENCE POUR LE MODE EN BOUCLE CONTINUE
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const loadMapping = async () => {
+      if (orders.length === 0) return;
+      const allItems = orders.flatMap(o => parseOrderDetails(o.order_details));
+      const mapping = await fetchOptionGroupMapping(allItems, activeRestoId);
+      setOptionGroupMapping(mapping);
+    };
+    loadMapping();
+  }, [orders, activeRestoId]);
 
   const startLoopingSound = () => {
     if (!audioEnabled) return;
@@ -220,7 +254,7 @@ const KDS = () => {
       if (!audioRef.current) {
         audioRef.current = new Audio('/son.mp3');
         audioRef.current.volume = 1.0;
-        audioRef.current.loop = true; // Active la boucle infinie native
+        audioRef.current.loop = true;
       }
       if (audioRef.current.paused) {
         audioRef.current.play().catch(e => console.error("Erreur lecture audio", e));
@@ -233,11 +267,10 @@ const KDS = () => {
   const stopLoopingSound = () => {
     if (audioRef.current) {
       audioRef.current.pause();
-      audioRef.current.currentTime = 0; // Remet la lecture au début
+      audioRef.current.currentTime = 0;
     }
   };
 
-  // 👇 EFFET ANALYSEUR : S'active ou se coupe s'il reste des commandes au statut "Nouvelle"
   useEffect(() => {
     const hasNewOrders = orders.some(o => o.status?.toLowerCase() === 'nouvelle');
     if (hasNewOrders && audioEnabled) {
@@ -304,6 +337,15 @@ const KDS = () => {
     }
   };
 
+  const toggleGroupOptionsInline = () => {
+    setGroupOptionsInline(prev => {
+      const next = !prev;
+      localStorage.setItem('kds_group_options_inline', String(next));
+      toast.success(next ? "Options groupées activées" : "1 option par ligne activée");
+      return next;
+    });
+  };
+
   const fetchTheme = async () => {
     if (!activeRestoId) return;
     try {
@@ -364,7 +406,7 @@ const KDS = () => {
     try {
       const { data: groups } = await supabase
         .from('option_groups')
-        .select('id, name')
+        .select('id, name, product_overrides, target_category_name, target_subcategory_id')
         .eq('restaurant_id', activeRestoId)
         .eq('show_on_kds', false);
 
@@ -373,29 +415,83 @@ const KDS = () => {
         return;
       }
 
-      const groupIds = groups.map(g => g.id);
       const namesToHide = new Set<string>();
-      
+      const groupIds: number[] = [];
+      const productIdsToFetch = new Set<string>();
+      const categoriesToFetch = new Set<string>();
+
       groups.forEach(g => {
+        if (g.id) groupIds.push(g.id);
         if (g.name) namesToHide.add(g.name.toLowerCase().trim());
+
+        if (g.product_overrides) {
+          try {
+            const overrides = typeof g.product_overrides === 'string'
+              ? JSON.parse(g.product_overrides)
+              : g.product_overrides;
+            if (overrides && typeof overrides === 'object') {
+              Object.keys(overrides).forEach(pId => {
+                if (pId) productIdsToFetch.add(String(pId));
+              });
+            }
+          } catch (e) {
+            console.error("Erreur parse product_overrides:", e);
+          }
+        }
+
+        if (g.target_category_name) {
+          categoriesToFetch.add(g.target_category_name.toLowerCase().trim());
+        }
       });
 
-      const { data: links } = await supabase
-        .from('option_group_links')
-        .select('option_id')
-        .in('group_id', groupIds);
+      if (groupIds.length > 0) {
+        const { data: links } = await supabase
+          .from('option_group_links')
+          .select('option_id')
+          .in('group_id', groupIds);
 
-      if (links && links.length > 0) {
-        const optionIds = links.map(l => l.option_id);
-        
-        const { data: options } = await supabase
-          .from('options')
+        if (links && links.length > 0) {
+          const optionIds = links.map(l => l.option_id).filter(Boolean);
+          if (optionIds.length > 0) {
+            const { data: options } = await supabase
+              .from('options')
+              .select('name')
+              .in('id', optionIds);
+
+            if (options) {
+              options.forEach(o => {
+                if (o.name) namesToHide.add(o.name.toLowerCase().trim());
+              });
+            }
+          }
+        }
+      }
+
+      if (productIdsToFetch.size > 0) {
+        const pIds = Array.from(productIdsToFetch);
+        const { data: products } = await supabase
+          .from('product')
           .select('name')
-          .in('id', optionIds);
+          .in('id', pIds);
 
-        if (options) {
-          options.forEach(o => {
-            if (o.name) namesToHide.add(o.name.toLowerCase().trim());
+        if (products) {
+          products.forEach(p => {
+            if (p.name) namesToHide.add(p.name.toLowerCase().trim());
+          });
+        }
+      }
+
+      if (categoriesToFetch.size > 0) {
+        const { data: catProducts } = await supabase
+          .from('product')
+          .select('name, category')
+          .eq('restaurant_id', activeRestoId);
+
+        if (catProducts) {
+          catProducts.forEach(p => {
+            if (p.name && p.category && categoriesToFetch.has(p.category.toLowerCase().trim())) {
+              namesToHide.add(p.name.toLowerCase().trim());
+            }
           });
         }
       }
@@ -441,12 +537,10 @@ const KDS = () => {
     const ordersChannel = supabase
       .channel(`kds_orders_${activeRestoId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `restaurant_id=eq.${activeRestoId}` }, (payload) => {
-        
         if (payload.eventType === 'DELETE') {
            setOrders(prev => prev.filter(o => o.id !== payload.old.id));
            return;
         }
-
         fetchOrders();
       })
       .subscribe();
@@ -466,11 +560,12 @@ const KDS = () => {
       .subscribe();
 
     return () => { 
+      stopLoopingSound();
       supabase.removeChannel(ordersChannel);
       supabase.removeChannel(optionGroupsChannel);
       supabase.removeChannel(categoriesChannel);
     };
-  }, [activeRestoId, audioEnabled]);
+  }, [activeRestoId]);
 
   const acceptOrder = async (orderId: string | number) => {
     try {
@@ -560,51 +655,7 @@ const KDS = () => {
         if (normDbHiddenCategories.includes(mainCategoryNorm)) return null;
         if (normSelectedCats.length > 0 && !normSelectedCats.includes(mainCategoryNorm)) return null;
 
-        const cleanItem = { ...item };
-
-        if (cleanItem.boisson) {
-          const boissonId = (cleanItem.boisson.id || '').toString().trim();
-          const baseBoissonId = boissonId.includes('-') ? boissonId.split('-')[0] : boissonId;
-          const boissonName = (cleanItem.boisson.name || '').toLowerCase().trim();
-          
-          let boissonCat = productDict[baseBoissonId] || productDict[boissonId] || productNameDict[boissonName] || cleanItem.boisson.category || cleanItem.boisson.category_id || '';
-          if (!boissonCat && boissonName) {
-            const normBoissonName = normalizeText(boissonName);
-            const found = availableCategories.find(cat => {
-              const normCat = normalizeText(cat);
-              return normCat && (normBoissonName.includes(normCat) || normCat.includes(normBoissonName));
-            });
-            if (found) boissonCat = found;
-          }
-          const boissonCatNorm = normalizeText(boissonCat) || 'boisson';
-          
-          if (normDbHiddenCategories.includes(boissonCatNorm) || (normSelectedCats.length > 0 && !normSelectedCats.includes(boissonCatNorm))) {
-            cleanItem.boisson = null; 
-          }
-        }
-
-        if (cleanItem.accompagnement) {
-          const accId = (cleanItem.accompagnement.id || '').toString().trim();
-          const baseAccId = accId.includes('-') ? accId.split('-')[0] : accId;
-          const accName = (cleanItem.accompagnement.name || '').toLowerCase().trim();
-          
-          let accCat = productDict[baseAccId] || productDict[accId] || productNameDict[accName] || cleanItem.accompagnement.category || cleanItem.accompagnement.category_id || '';
-          if (!accCat && accName) {
-            const normAccName = normalizeText(accName);
-            const found = availableCategories.find(cat => {
-              const normCat = normalizeText(cat);
-              return normCat && (normAccName.includes(normCat) || normCat.includes(normAccName));
-            });
-            if (found) accCat = found;
-          }
-          const accCatNorm = normalizeText(accCat) || 'accompagnement';
-          
-          if (normDbHiddenCategories.includes(accCatNorm) || (normSelectedCats.length > 0 && !normSelectedCats.includes(accCatNorm))) {
-            cleanItem.accompagnement = null; 
-          }
-        }
-
-        return cleanItem;
+        return { ...item };
       }).filter(Boolean);
 
       const groupedItems: any[] = [];
@@ -612,21 +663,22 @@ const KDS = () => {
         const productName = item.product?.name || item.name || 'Produit inconnu';
         const qty = item.quantity || 1;
         
-        const options = extractOptionsForKDS(item, hiddenOptionNames);
-        const sig = `${productName}|${options.join('|')}`;
+        const optionRows = extractOptionLinesForKDS(item, hiddenOptionNames, optionGroupMapping, groupOptionsInline);
+        const sig = `${productName}|${optionRows.map(r => r.items.map(o => `${o.isSans ? 'sans:' : ''}${o.name}`).join(',')).join('|')}`;
         
         const existing = groupedItems.find(g => g.sig === sig);
         if (existing) {
           existing.qty += qty;
         } else {
-          groupedItems.push({ productName, qty, options, sig });
+          groupedItems.push({ productName, qty, optionRows, sig });
         }
       });
 
+      // Calcul exact : 1 ligne produit + N lignes d'options réelles
       let totalLines = 0;
       groupedItems.forEach((gItem: any) => {
-        totalLines += 1; 
-        totalLines += gItem.options.length; 
+        totalLines += 1;
+        totalLines += gItem.optionRows.length;
       });
       
       let slots = Math.ceil(totalLines / LINES_PER_COLUMN);
@@ -635,7 +687,7 @@ const KDS = () => {
 
       return { ...order, groupedItems, _slots: displaySlots, rawSlots: slots };
     }).filter(order => order.groupedItems.length > 0);
-  }, [orders, selectedCategories, productDict, productNameDict, hiddenOptionNames, dbHiddenCategories, availableCategories]);
+  }, [orders, selectedCategories, productDict, productNameDict, hiddenOptionNames, dbHiddenCategories, availableCategories, optionGroupMapping, groupOptionsInline]);
 
   const historyOrders = orders
     .filter(o => !isActiveForKDS(o.status))
@@ -782,7 +834,7 @@ const KDS = () => {
                       {isNewOrder && <BellRing className="w-3 h-3 2xl:w-6 2xl:h-6 text-white animate-bounce" />}
                       {getOrderTypeBadge(order.order_type_id)}
                     </div>
-                    <OrderTimer createdAt={order.created_at} />
+                    <OrderTimer createdAt={order.created_at} now={now} />
                     <div className="text-[13px] xl:text-lg 2xl:text-2xl font-black text-slate-900 bg-white px-1.5 2xl:px-3 rounded-sm">
                       {order.order_number || `#${order.id.toString().slice(-3)}`}
                     </div>
@@ -805,6 +857,7 @@ const KDS = () => {
                         order.groupedItems.forEach((gItem: any) => {
                           const itemKey = `${order.id}-${gItem.sig}`;
                           
+                          // 1. Ligne Produit
                           flatLines.push({
                             id: `${itemKey}-prod`,
                             isProduct: true,
@@ -812,17 +865,19 @@ const KDS = () => {
                             name: gItem.productName,
                             sig: gItem.sig,
                             itemKey,
-                            hasOptions: gItem.options.length > 0
+                            hasOptions: gItem.optionRows.length > 0
                           });
                           
-                          gItem.options.forEach((opt: string, oIdx: number) => {
+                          // 2. Lignes d'options
+                          gItem.optionRows.forEach((row: any, rIdx: number) => {
                              flatLines.push({
-                                id: `${itemKey}-opt-${oIdx}`,
+                                id: `${itemKey}-row-${rIdx}`,
                                 isProduct: false,
-                                name: opt,
+                                items: row.items,
+                                isSans: row.isSans,
                                 sig: gItem.sig,
                                 itemKey,
-                                isLast: oIdx === gItem.options.length - 1
+                                isLast: rIdx === gItem.optionRows.length - 1
                              });
                           });
                         });
@@ -854,29 +909,38 @@ const KDS = () => {
                                   </div>
                                 );
                               } else {
-                                const cleanOptName = line.name.replace(/^[0-9]+x\s*/, '').replace(/^\+\s*/, '').trim().toLowerCase();
-                                const isSans = cleanOptName.startsWith('sans');
-
                                 let bgClass = 'bg-slate-800';
                                 let textClass = 'text-white';
+                                let dividerClass = 'border-r border-white/30';
                                 
                                 if (isDone) {
                                   bgClass = 'bg-emerald-400';
                                   textClass = 'text-emerald-950';
-                                } else if (isSans) {
+                                  dividerClass = 'border-r border-emerald-800/40';
+                                } else if (line.isSans) {
                                   bgClass = 'bg-red-500';
                                   textClass = 'text-white';
+                                  dividerClass = 'border-r border-white/40';
                                 }
+
+                                const itemsList = line.items && line.items.length > 0 ? line.items : [];
 
                                 return (
                                   <div 
                                     key={line.id} 
                                     onClick={() => toggleItemDone(line.id)}
-                                    className={`min-h-0 w-full overflow-hidden flex items-center px-1.5 2xl:px-3 cursor-pointer transition-colors border-x border-gray-300 ${bgClass} ${isChunkFirst ? 'border-t rounded-t-sm' : ''} ${isChunkLast ? 'border-b rounded-b-sm shadow-sm' : 'border-b border-white/10'}`}
+                                    className={`min-h-0 w-full overflow-hidden flex items-stretch cursor-pointer transition-colors border-x border-gray-300 ${bgClass} ${isChunkFirst ? 'border-t rounded-t-sm' : ''} ${isChunkLast ? 'border-b rounded-b-sm shadow-sm' : 'border-b border-white/10'}`}
                                   >
-                                    <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black uppercase leading-tight truncate ${textClass}`}>
-                                      {line.name}
-                                    </span>
+                                    {itemsList.map((opt: any, optIdx: number) => (
+                                      <div 
+                                        key={optIdx} 
+                                        className={`flex-1 min-w-0 flex items-center justify-center text-center px-1.5 2xl:px-3 h-full ${optIdx < itemsList.length - 1 ? dividerClass : ''}`}
+                                      >
+                                        <span className={`text-[9px] xl:text-[11px] 2xl:text-[16px] font-black uppercase leading-tight truncate w-full ${textClass}`}>
+                                          {opt.qty > 1 ? `${opt.qty}x ` : ''}{opt.name}
+                                        </span>
+                                      </div>
+                                    ))}
                                   </div>
                                 );
                               }
@@ -955,7 +1019,7 @@ const KDS = () => {
               <button onClick={() => { setIsSettingsOpen(false); setAdminUnlockCount(0); }} className="text-white/50 hover:text-white p-1 2xl:p-2"><X className="w-5 h-5 2xl:w-8 2xl:h-8" /></button>
             </div>
 
-            <div className="p-4 2xl:p-8 space-y-6 2xl:space-y-12">
+            <div className="p-4 2xl:p-8 space-y-6 2xl:space-y-8 overflow-y-auto max-h-[75vh] custom-scrollbar">
               
               {(!activeRestoId || adminUnlockCount >= 5) && (
                 <div>
@@ -967,7 +1031,37 @@ const KDS = () => {
                 </div>
               )}
 
-              <div>
+              {/* DISPOSITION DES OPTIONS KDS */}
+              <div className="border-t border-white/10 pt-4 2xl:pt-6">
+                <h3 className="text-xs 2xl:text-xl font-black uppercase text-white mb-2 2xl:mb-4 flex items-center gap-1.5 2xl:gap-3">
+                  <LayoutGrid className="w-3.5 h-3.5 2xl:w-6 2xl:h-6 text-amber-500"/> Disposition des options
+                </h3>
+                <div className="flex items-center justify-between bg-white/5 p-3 2xl:p-5 border border-white/10">
+                  <div className="pr-4">
+                    <div className="text-xs 2xl:text-lg font-bold text-white uppercase">
+                      Grouper les options d'un même groupe
+                    </div>
+                    <div className="text-[10px] 2xl:text-sm text-white/50 mt-0.5">
+                      {groupOptionsInline 
+                        ? "Activé : Les options d'un même groupe s'affichent côte à côte (ex: 2 sauces sur la même ligne)." 
+                        : "Désactivé : Chaque option occupe sa propre ligne pleine largeur (lisibilité maximale)."}
+                    </div>
+                  </div>
+                  <button
+                    onClick={toggleGroupOptionsInline}
+                    className={`px-4 py-2 2xl:px-6 2xl:py-3 font-black text-xs 2xl:text-base uppercase rounded-none transition-colors shrink-0 ${
+                      groupOptionsInline 
+                        ? 'bg-emerald-500 text-slate-900' 
+                        : 'bg-white/10 text-white hover:bg-white/20'
+                    }`}
+                  >
+                    {groupOptionsInline ? 'ACTIVÉ' : 'DÉSACTIVÉ'}
+                  </button>
+                </div>
+              </div>
+
+              {/* FILTRES PAR CATÉGORIE */}
+              <div className="border-t border-white/10 pt-4 2xl:pt-6">
                 <div className="flex justify-between items-end mb-2 2xl:mb-4">
                   <h3 className="text-xs 2xl:text-xl font-black uppercase text-white flex items-center gap-1.5 2xl:gap-3"><Filter className="w-3.5 h-3.5 2xl:w-6 2xl:h-6 text-amber-500"/> Filtres par catégorie</h3>
                   {selectedCategories.length > 0 && <button onClick={() => { setSelectedCategories([]); localStorage.removeItem('kds_selected_categories'); }} className="text-[10px] 2xl:text-base text-red-400 font-bold uppercase">Tout afficher</button>}
