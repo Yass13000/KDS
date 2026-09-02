@@ -17,9 +17,14 @@ import {
   VolumeX,
   WifiOff,
   Filter,
-  LayoutGrid
+  LayoutGrid,
+  Type,
+  CalendarClock,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { getFormattedOrderOptions, fetchOptionGroupMapping } from '@/lib/orderFormatter';
+import { ScheduledOrdersModal } from '@/components/ScheduledOrdersModal';
 
 const ORDER_TYPE_IDS = {
   SUR_PLACE: '633425b1-f86c-4c17-8cba-b258906ad317',
@@ -27,7 +32,49 @@ const ORDER_TYPE_IDS = {
   LIVRAISON: 'c48b80a4-0dcd-4f75-9e67-a99d30bf4f9d'
 };
 
-const LINES_PER_COLUMN = 7; 
+const LINES_PER_SINGLE_ROW = 7; 
+const LINES_PER_DOUBLE_ROW = 15; 
+const SCHEDULED_THRESHOLD_MINUTES = 30;
+
+export const isRealScheduledOrder = (order: any, now: Date) => {
+  if (!order.scheduled_time) return false;
+  const schedTime = new Date(order.scheduled_time).getTime();
+  const createdTime = new Date(order.created_at).getTime();
+  if (isNaN(schedTime) || isNaN(createdTime)) return false;
+
+  const diffFromCreation = (schedTime - createdTime) / 60000;
+  const diffFromNow = (schedTime - now.getTime()) / 60000;
+
+  return diffFromCreation > 30 && diffFromNow > SCHEDULED_THRESHOLD_MINUTES;
+};
+
+const PRODUCT_FONT_CONFIGS: Record<string, { label: string; textClass: string; qtyClass: string }> = {
+  small: { label: 'Petite', textClass: 'text-[9.5px] xl:text-[11.5px] 2xl:text-[16px]', qtyClass: 'text-[9px] xl:text-[11px] 2xl:text-[15px]' },
+  normal: { label: 'Normale', textClass: 'text-[11px] xl:text-[13px] 2xl:text-[18px]', qtyClass: 'text-[10px] xl:text-[12px] 2xl:text-[17px]' },
+  large: { label: 'Grande', textClass: 'text-[12.5px] xl:text-[14.5px] 2xl:text-[20px]', qtyClass: 'text-[11px] xl:text-[13px] 2xl:text-[18px]' },
+  xlarge: { label: 'Très grande', textClass: 'text-[14px] xl:text-[16px] 2xl:text-[22px]', qtyClass: 'text-[12px] xl:text-[14px] 2xl:text-[19px]' }
+};
+
+const OPTION_FONT_CONFIGS: Record<string, { label: string; single: string; double: string; triple: string }> = {
+  small: {
+    label: 'Petite',
+    single: 'text-[8.5px] xl:text-[10px] 2xl:text-[14px]',
+    double: 'text-[7.5px] xl:text-[8.5px] 2xl:text-[12px] tracking-tight',
+    triple: 'text-[6.5px] xl:text-[7.5px] 2xl:text-[10px] tracking-tighter leading-none'
+  },
+  normal: {
+    label: 'Normale',
+    single: 'text-[9.5px] xl:text-[11.5px] 2xl:text-[16px]',
+    double: 'text-[8.5px] xl:text-[9.5px] 2xl:text-[13px] tracking-tight',
+    triple: 'text-[7px] xl:text-[8px] 2xl:text-[11px] tracking-tighter leading-none'
+  },
+  large: {
+    label: 'Grande',
+    single: 'text-[11px] xl:text-[13px] 2xl:text-[18px]',
+    double: 'text-[9.5px] xl:text-[11px] 2xl:text-[15px] tracking-tight',
+    triple: 'text-[8px] xl:text-[9px] 2xl:text-[12.5px] tracking-tighter leading-none'
+  }
+};
 
 const chunkArrayByLines = (arr: any[], linesPerCol: number) => {
   if (arr.length === 0) return [];
@@ -61,7 +108,6 @@ const parseOrderDetails = (details: any): any[] => {
   return [];
 };
 
-// 🟢 Extraction propre basée sur orderFormatter.ts avec groupement par groupe d'options
 const extractOptionLinesForKDS = (
   item: any, 
   hiddenOptionNames: string[] = [], 
@@ -78,17 +124,9 @@ const extractOptionLinesForKDS = (
     });
   };
 
-  const resultRows: { items: { name: string; qty: number; isSans: boolean }[]; isSans: boolean }[] = [];
+  const resultRows: { items: { name: string; qty: number; isSans: boolean }[]; isSans: boolean; groupIdx: number }[] = [];
+  let groupCounter = 0;
 
-  // 1. Version Solo
-  if (item.isSolo) {
-    resultRows.push({
-      items: [{ name: "🍔 VERSION SOLO", qty: 1, isSans: false }],
-      isSans: false
-    });
-  }
-
-  // 2. Récupération unifiée via getFormattedOrderOptions
   const optionGroups = getFormattedOrderOptions(item, groupMapping);
 
   const sansItems: { name: string; qty: number; isSans: boolean }[] = [];
@@ -102,14 +140,12 @@ const extractOptionLinesForKDS = (
     const validItems = (grp.items || []).filter(opt => opt && opt.name && !isHidden(opt.name));
     if (validItems.length === 0) return;
 
-    // Isoler les ingrédients retirés (catégorie INGRÉDIENTS ou isSans)
     validItems.forEach(opt => {
       if (opt.isSans || grp.originalGroupName === 'INGRÉDIENTS') {
         sansItems.push({ name: opt.name, qty: opt.qty || 1, isSans: true });
       }
     });
 
-    // Isoler les options normales par groupe
     const nonSansItems = validItems.filter(opt => !opt.isSans && grp.originalGroupName !== 'INGRÉDIENTS');
     if (nonSansItems.length > 0) {
       normalGroups.push({
@@ -119,29 +155,27 @@ const extractOptionLinesForKDS = (
     }
   });
 
-  // Affichage des "SANS ..." en ROUGE
   if (sansItems.length > 0) {
     if (groupInline) {
       for (let i = 0; i < sansItems.length; i += 2) {
-        resultRows.push({ items: sansItems.slice(i, i + 2), isSans: true });
+        resultRows.push({ items: sansItems.slice(i, i + 2), isSans: true, groupIdx: -1 });
       }
     } else {
       sansItems.forEach(opt => {
-        resultRows.push({ items: [opt], isSans: true });
+        resultRows.push({ items: [opt], isSans: true, groupIdx: -1 });
       });
     }
   }
 
-  // Affichage des options normales par groupe
   normalGroups.forEach(grp => {
+    const currentIdx = groupCounter++;
     if (groupInline) {
-      // Les options du même groupe s'affichent ensemble sur la même ligne (par blocs de 2-3 max)
       for (let i = 0; i < grp.items.length; i += 3) {
-        resultRows.push({ items: grp.items.slice(i, i + 3), isSans: false });
+        resultRows.push({ items: grp.items.slice(i, i + 3), isSans: false, groupIdx: currentIdx });
       }
     } else {
       grp.items.forEach(opt => {
-        resultRows.push({ items: [opt], isSans: false });
+        resultRows.push({ items: [opt], isSans: false, groupIdx: currentIdx });
       });
     }
   });
@@ -171,25 +205,160 @@ const HeaderClock = () => {
   );
 };
 
-const OrderTimer = ({ createdAt, now }: { createdAt: string; now: Date }) => {
+const OrderTimer = ({ 
+  createdAt, 
+  now, 
+  scheduledTime, 
+  targetPrepMinutes = 15 
+}: { 
+  createdAt: string; 
+  now: Date; 
+  scheduledTime?: string; 
+  targetPrepMinutes?: number;
+}) => {
   const created = new Date(createdAt).getTime();
-  const diffSeconds = Math.max(0, Math.floor((now.getTime() - created) / 1000));
-  const minutes = Math.floor(diffSeconds / 60);
-  const seconds = diffSeconds % 60;
+  const schedTime = scheduledTime ? new Date(scheduledTime).getTime() : null;
+  const isTrulyScheduled = schedTime && (schedTime - created) > (30 * 60 * 1000);
 
-  const text = `${isNaN(minutes) ? '00' : minutes.toString().padStart(2, '0')}:${isNaN(seconds) ? '00' : seconds.toString().padStart(2, '0')}`;
-  const isLate = minutes >= 15;
-  const isWarning = minutes >= 10 && minutes < 15;
+  if (isTrulyScheduled) {
+    const diffMs = schedTime - now.getTime();
+    const isLate = diffMs < 0;
+    const absSec = Math.abs(Math.floor(diffMs / 1000));
+    const mins = Math.floor(absSec / 60);
+    const secs = absSec % 60;
+    const text = `${isLate ? 'RETARD ' : 'DANS '}${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
-  let timeColorClass = 'bg-black/20 text-white border-transparent';
-  if (isLate) timeColorClass = 'bg-red-600 text-white animate-pulse border-red-400';
-  else if (isWarning) timeColorClass = 'bg-orange-500 text-white border-transparent';
+    return (
+      <div className={`flex items-center gap-1 px-1.5 py-0.5 2xl:px-3 2xl:py-1 rounded-none border font-black text-[11px] xl:text-sm 2xl:text-xl tracking-wider transition-all ${
+        isLate ? 'bg-red-600 text-white animate-pulse border-red-400' : 'bg-purple-600 text-white border-transparent'
+      }`}>
+        <CalendarClock className="w-3 h-3 xl:w-4 xl:h-4 2xl:w-6 2xl:h-6" /> {text}
+      </div>
+    );
+  }
 
-  return (
-    <div className={`flex items-center gap-1 px-1 py-0.5 2xl:px-3 2xl:py-1.5 border font-black text-[11px] xl:text-sm 2xl:text-xl tracking-wider transition-all ${timeColorClass}`}>
-      <Timer className="w-3 h-3 xl:w-4 xl:h-4 2xl:w-6 2xl:h-6" />{text}
-    </div>
-  );
+  const elapsedSeconds = Math.max(0, Math.floor((now.getTime() - created) / 1000));
+  const targetSeconds = (targetPrepMinutes || 15) * 60;
+  const remainingSeconds = targetSeconds - elapsedSeconds;
+
+  if (remainingSeconds >= 0) {
+    const mins = Math.floor(remainingSeconds / 60);
+    const secs = remainingSeconds % 60;
+    const text = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    const isWarning = remainingSeconds <= 3 * 60;
+    const timeColorClass = isWarning 
+      ? 'bg-orange-500 text-white border-transparent' 
+      : 'bg-black/20 text-white border-transparent';
+
+    return (
+      <div className={`flex items-center gap-1 px-1.5 py-0.5 2xl:px-3 2xl:py-1 rounded-none border font-black text-[11px] xl:text-sm 2xl:text-xl tracking-wider transition-all ${timeColorClass}`}>
+        <Timer className="w-3 h-3 xl:w-4 xl:h-4 2xl:w-6 2xl:h-6" /> {text}
+      </div>
+    );
+  } else {
+    const overtimeSeconds = Math.abs(remainingSeconds);
+    const mins = Math.floor(overtimeSeconds / 60);
+    const secs = overtimeSeconds % 60;
+    const text = `+${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+
+    return (
+      <div className="flex items-center gap-1 px-1.5 py-0.5 2xl:px-3 2xl:py-1 rounded-none border font-black text-[11px] xl:text-sm 2xl:text-xl tracking-wider transition-all bg-red-600 text-white animate-pulse border-red-400">
+        <Timer className="w-3 h-3 xl:w-4 xl:h-4 2xl:w-6 2xl:h-6" /> {text}
+      </div>
+    );
+  }
+};
+
+// 🟢 ALGORITHME ZÉRO-TROU (Smart Column Backfill)
+// Scanne colonne par colonne (Col 1 Haut, Col 1 Bas, Col 2 Haut, Col 2 Bas...) pour combler immédiatement les cases libres
+const paginateNoHoles = (orders: any[]) => {
+  if (!orders || orders.length === 0) return [[]];
+  const pages: any[][] = [];
+  const ROWS = 2;
+  const COLS = 5;
+
+  let currentGrid = Array(ROWS).fill(null).map(() => Array(COLS).fill(false));
+  let currentPage: any[] = [];
+
+  const canPlace = (grid: boolean[][], r: number, c: number, rSpan: number, cSpan: number) => {
+    if (r + rSpan > ROWS || c + cSpan > COLS) return false;
+    for (let dr = 0; dr < rSpan; dr++) {
+      for (let dc = 0; dc < cSpan; dc++) {
+        if (grid[r + dr][c + dc]) return false;
+      }
+    }
+    return true;
+  };
+
+  const place = (grid: boolean[][], r: number, c: number, rSpan: number, cSpan: number) => {
+    for (let dr = 0; dr < rSpan; dr++) {
+      for (let dc = 0; dc < cSpan; dc++) {
+        grid[r + dr][c + dc] = true;
+      }
+    }
+  };
+
+  orders.forEach(order => {
+    const rSpan = Math.min(2, order.rowSpan || 1);
+    const cSpan = Math.min(COLS, order.colSpan || 1);
+    let placed = false;
+
+    // Balayage en priorité de colonne : teste Col 0 Haut, Col 0 Bas, Col 1 Haut, Col 1 Bas...
+    for (let c = 0; c <= COLS - cSpan; c++) {
+      for (let r = 0; r <= ROWS - rSpan; r++) {
+        if (canPlace(currentGrid, r, c, rSpan, cSpan)) {
+          place(currentGrid, r, c, rSpan, cSpan);
+          currentPage.push({
+            ...order,
+            gridRow: r + 1,
+            gridCol: c + 1
+          });
+          placed = true;
+          break;
+        }
+      }
+      if (placed) break;
+    }
+
+    // Si aucune place sur la page courante, nouvelle page
+    if (!placed) {
+      if (currentPage.length > 0) {
+        pages.push(currentPage);
+      }
+      currentGrid = Array(ROWS).fill(null).map(() => Array(COLS).fill(false));
+      currentPage = [];
+
+      for (let c = 0; c <= COLS - cSpan; c++) {
+        for (let r = 0; r <= ROWS - rSpan; r++) {
+          if (canPlace(currentGrid, r, c, rSpan, cSpan)) {
+            place(currentGrid, r, c, rSpan, cSpan);
+            currentPage.push({
+              ...order,
+              gridRow: r + 1,
+              gridCol: c + 1
+            });
+            placed = true;
+            break;
+          }
+        }
+        if (placed) break;
+      }
+
+      if (!placed) {
+        currentPage.push({
+          ...order,
+          gridRow: 1,
+          gridCol: 1
+        });
+      }
+    }
+  });
+
+  if (currentPage.length > 0) {
+    pages.push(currentPage);
+  }
+
+  return pages.length > 0 ? pages : [[]];
 };
 
 const KDS = () => {
@@ -212,20 +381,32 @@ const KDS = () => {
   const [activeRestoId, setActiveRestoId] = useState(localStorage.getItem('pos_restaurant_id') || '');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isScheduledModalOpen, setIsScheduledModalOpen] = useState(false);
+  
+  const [forcedOrderIds, setForcedOrderIds] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState<number>(1);
+
   const [tempRestoId, setTempRestoId] = useState(activeRestoId);
   const [adminUnlockCount, setAdminUnlockCount] = useState(0);
 
-  // 🟢 Option pour grouper les options sur la même ligne (Activé par défaut)
   const [groupOptionsInline, setGroupOptionsInline] = useState<boolean>(() => {
     return localStorage.getItem('kds_group_options_inline') !== 'false';
   });
 
+  const [productFontSize, setProductFontSize] = useState<string>(() => {
+    return localStorage.getItem('kds_product_font_size') || 'normal';
+  });
+
+  const [optionFontSize, setOptionFontSize] = useState<string>(() => {
+    return localStorage.getItem('kds_option_font_size') || 'normal';
+  });
+
   const [themeColors, setThemeColors] = useState({ primary: '#FBBF24', secondary: '#1e293b' });
+  const [targetPrepMinutes, setTargetPrepMinutes] = useState<number>(15);
 
   const [productDict, setProductDict] = useState<Record<string, string>>({});
   const [productNameDict, setProductNameDict] = useState<Record<string, string>>({});
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
-  
   const [dbHiddenCategories, setDbHiddenCategories] = useState<string[]>([]);
 
   const [selectedCategories, setSelectedCategories] = useState<string[]>(
@@ -346,12 +527,24 @@ const KDS = () => {
     });
   };
 
+  const handleChangeProductFontSize = (size: string) => {
+    setProductFontSize(size);
+    localStorage.setItem('kds_product_font_size', size);
+    toast.success(`Police produit : ${PRODUCT_FONT_CONFIGS[size]?.label || size}`);
+  };
+
+  const handleChangeOptionFontSize = (size: string) => {
+    setOptionFontSize(size);
+    localStorage.setItem('kds_option_font_size', size);
+    toast.success(`Police option : ${OPTION_FONT_CONFIGS[size]?.label || size}`);
+  };
+
   const fetchTheme = async () => {
     if (!activeRestoId) return;
     try {
       const { data, error } = await supabase
         .from('restaurants')
-        .select('theme_primary, theme_secondary')
+        .select('theme_primary, theme_secondary, prep_time_dine_in')
         .eq('id', activeRestoId)
         .single();
         
@@ -360,9 +553,12 @@ const KDS = () => {
           primary: data.theme_primary || '#FBBF24',
           secondary: data.theme_secondary || '#1e293b'
         });
+        if (data.prep_time_dine_in !== undefined && data.prep_time_dine_in !== null) {
+          setTargetPrepMinutes(Number(data.prep_time_dine_in) || 15);
+        }
       }
     } catch (e) {
-      console.error("Erreur de chargement du thème", e);
+      console.error("Erreur chargement thème/prep_time", e);
     }
   };
 
@@ -513,7 +709,7 @@ const KDS = () => {
       const past24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const { data, error } = await supabase
         .from('orders')
-        .select('id, status, created_at, order_number, order_type_id, order_details') 
+        .select('id, status, created_at, scheduled_time, order_number, order_type_id, order_details, customer_name, customer_phone') 
         .eq('restaurant_id', activeRestoId)
         .gte('created_at', past24Hours.toISOString())
         .order('created_at', { ascending: true });
@@ -589,6 +785,12 @@ const KDS = () => {
     } catch (e) { toast.error("Erreur lors de la restauration"); }
   };
 
+  const handleForceSendToKitchen = (orderId: string | number) => {
+    setForcedOrderIds(prev => new Set(prev).add(String(orderId)));
+    setIsScheduledModalOpen(false);
+    toast.success(`Commande #${orderId} envoyée en cuisine !`);
+  };
+
   const handleSaveSettings = () => {
     if (tempRestoId.trim().length < 5) {
       toast.error("Veuillez entrer un ID valide");
@@ -614,15 +816,26 @@ const KDS = () => {
 
   const getOrderTypeBadge = (typeId: string) => {
     switch(typeId) {
-      case ORDER_TYPE_IDS.SUR_PLACE: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-blue-600 bg-white px-1 2xl:px-2 py-0.5 uppercase tracking-widest">SP</span>;
-      case ORDER_TYPE_IDS.EMPORTER: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-orange-600 bg-white px-1 2xl:px-2 py-0.5 uppercase tracking-widest">EMP</span>;
-      case ORDER_TYPE_IDS.LIVRAISON: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-purple-600 bg-white px-1 2xl:px-2 py-0.5 uppercase tracking-widest">LIV</span>;
-      default: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-gray-600 bg-white px-1 2xl:px-2 py-0.5 uppercase tracking-widest">?</span>;
+      case ORDER_TYPE_IDS.SUR_PLACE: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-blue-600 bg-white px-1.5 py-0.5 uppercase tracking-widest rounded-none shadow-sm">SP</span>;
+      case ORDER_TYPE_IDS.EMPORTER: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-orange-600 bg-white px-1.5 py-0.5 uppercase tracking-widest rounded-none shadow-sm">EMP</span>;
+      case ORDER_TYPE_IDS.LIVRAISON: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-purple-600 bg-white px-1.5 py-0.5 uppercase tracking-widest rounded-none shadow-sm">LIV</span>;
+      default: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-gray-600 bg-white px-1.5 py-0.5 uppercase tracking-widest rounded-none shadow-sm">?</span>;
     }
   };
 
-  const displayOrders = useMemo(() => {
-    const active = orders.filter(o => isActiveForKDS(o.status));
+  const futureScheduledCount = useMemo(() => {
+    return orders.filter(o => isActiveForKDS(o.status) && isRealScheduledOrder(o, now) && !forcedOrderIds.has(String(o.id))).length;
+  }, [orders, now, forcedOrderIds]);
+
+  const allDisplayOrders = useMemo(() => {
+    const active = orders.filter(o => {
+      if (!isActiveForKDS(o.status)) return false;
+      if (isRealScheduledOrder(o, now) && !forcedOrderIds.has(String(o.id))) {
+        return false;
+      }
+      return true;
+    });
+
     const normSelectedCats = selectedCategories.map(c => normalizeText(c));
     const normDbHiddenCategories = dbHiddenCategories.map(c => normalizeText(c));
     
@@ -674,20 +887,89 @@ const KDS = () => {
         }
       });
 
-      // Calcul exact : 1 ligne produit + N lignes d'options réelles
-      let totalLines = 0;
+      const flatLines: any[] = [];
       groupedItems.forEach((gItem: any) => {
-        totalLines += 1;
-        totalLines += gItem.optionRows.length;
+        const itemKey = `${order.id}-${gItem.sig}`;
+        
+        flatLines.push({
+          id: `${itemKey}-prod`,
+          isProduct: true,
+          qty: gItem.qty,
+          name: gItem.productName,
+          sig: gItem.sig,
+          itemKey,
+          hasOptions: gItem.optionRows.length > 0
+        });
+        
+        gItem.optionRows.forEach((row: any, rIdx: number) => {
+          flatLines.push({
+            id: `${itemKey}-row-${rIdx}`,
+            isProduct: false,
+            items: row.items,
+            isSans: row.isSans,
+            groupIdx: row.groupIdx,
+            sig: gItem.sig,
+            itemKey,
+            isLast: rIdx === gItem.optionRows.length - 1
+          });
+        });
       });
-      
-      let slots = Math.ceil(totalLines / LINES_PER_COLUMN);
-      if (slots < 1) slots = 1;
-      let displaySlots = slots > 5 ? 5 : slots;
 
-      return { ...order, groupedItems, _slots: displaySlots, rawSlots: slots };
+      const totalLines = flatLines.length;
+
+      let rowSpan = 1;
+      let colSpan = 1;
+      let linesPerColumn = LINES_PER_SINGLE_ROW;
+
+      if (totalLines > LINES_PER_SINGLE_ROW && totalLines <= LINES_PER_DOUBLE_ROW) {
+        rowSpan = 2;
+        colSpan = 1;
+        linesPerColumn = LINES_PER_DOUBLE_ROW;
+      } else if (totalLines > LINES_PER_DOUBLE_ROW) {
+        rowSpan = 2;
+        colSpan = Math.min(5, Math.ceil(totalLines / LINES_PER_DOUBLE_ROW));
+        linesPerColumn = LINES_PER_DOUBLE_ROW;
+      }
+
+      const chunks = chunkArrayByLines(flatLines, linesPerColumn);
+
+      return { 
+        ...order, 
+        groupedItems, 
+        flatLines, 
+        chunks, 
+        rowSpan, 
+        colSpan, 
+        linesPerColumn 
+      };
     }).filter(order => order.groupedItems.length > 0);
-  }, [orders, selectedCategories, productDict, productNameDict, hiddenOptionNames, dbHiddenCategories, availableCategories, optionGroupMapping, groupOptionsInline]);
+  }, [orders, selectedCategories, productDict, productNameDict, hiddenOptionNames, dbHiddenCategories, availableCategories, optionGroupMapping, groupOptionsInline, forcedOrderIds, now]);
+
+  // 🟢 UTILISATION DU NOUVEL ALGORITHME ZÉRO-TROU
+  const paginatedPages = useMemo(() => {
+    return paginateNoHoles(allDisplayOrders);
+  }, [allDisplayOrders]);
+
+  const totalPages = paginatedPages.length;
+  const currentOrders = paginatedPages[currentPage - 1] || [];
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(Math.max(1, totalPages));
+    }
+  }, [totalPages, currentPage]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') {
+        setCurrentPage(p => Math.max(1, p - 1));
+      } else if (e.key === 'ArrowRight') {
+        setCurrentPage(p => Math.min(totalPages, p + 1));
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [totalPages]);
 
   const historyOrders = orders
     .filter(o => !isActiveForKDS(o.status))
@@ -709,9 +991,12 @@ const KDS = () => {
     }));
   };
 
+  const currentProductFont = PRODUCT_FONT_CONFIGS[productFontSize] || PRODUCT_FONT_CONFIGS.normal;
+  const currentOptionFont = OPTION_FONT_CONFIGS[optionFontSize] || OPTION_FONT_CONFIGS.normal;
+
   return (
     <div 
-      className="h-[100dvh] w-full bg-secondary text-white font-helvetica flex flex-col overflow-hidden relative" 
+      className="h-[100dvh] w-full bg-secondary text-white font-helvetica flex flex-col overflow-hidden relative select-none rounded-none" 
       style={{
         '--theme-primary': themeColors.primary,
         '--theme-secondary': themeColors.secondary,
@@ -723,23 +1008,18 @@ const KDS = () => {
           .text-primary { color: var(--theme-primary) !important; }
 
           @keyframes alert-blink {
-            0% { border-color: #ef4444; box-shadow: inset 0 0 5px rgba(239, 68, 68, 0.4); }
-            50% { border-color: #fca5a5; box-shadow: inset 0 0 15px rgba(239, 68, 68, 1); }
-            100% { border-color: #ef4444; box-shadow: inset 0 0 5px rgba(239, 68, 68, 0.4); }
+            0% { border-color: #ef4444; box-shadow: inset 0 0 0 2px #ef4444; }
+            50% { border-color: #fca5a5; box-shadow: inset 0 0 0 4px #ef4444; }
+            100% { border-color: #ef4444; box-shadow: inset 0 0 0 2px #ef4444; }
           }
           .animate-alert { animation: alert-blink 0.8s ease-in-out infinite; }
-          
-          .custom-scrollbar::-webkit-scrollbar { width: 8px; }
-          .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.1); }
-          .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(100, 100, 100, 0.5); border-radius: 10px; }
-          .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(100, 100, 100, 0.8); }
         `}
       </style>
 
       {showAudioUnlock && !missingIdError && (
         <button 
           onClick={unlockAudio} 
-          className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-full font-black animate-bounce shadow-xl z-50 flex items-center gap-3 border-2 border-white cursor-pointer"
+          className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-none font-black animate-bounce shadow-2xl z-50 flex items-center gap-3 border-2 border-white cursor-pointer"
         >
           <VolumeX size={24} /> CLIQUEZ ICI POUR ACTIVER LE SON
         </button>
@@ -751,37 +1031,79 @@ const KDS = () => {
         </div>
       )}
 
-      <div className={`flex justify-between items-center px-2 py-1 2xl:px-4 2xl:py-3 bg-secondary border-b border-black/50 z-10 flex-shrink-0 ${isOffline ? 'mt-6 2xl:mt-10' : ''}`}>
+      {/* BANDEAU SUPÉRIEUR AVEC PAGINATION */}
+      <div className={`flex justify-between items-center px-3 py-1.5 2xl:px-5 2xl:py-2.5 bg-secondary border-b border-black/40 z-10 flex-shrink-0 ${isOffline ? 'mt-6 2xl:mt-10' : ''}`}>
         <div className="flex items-center gap-2 2xl:gap-4">
-          <span className="text-[11px] xl:text-sm 2xl:text-xl font-black uppercase tracking-widest text-white/50">
+          <span className="text-[12px] xl:text-sm 2xl:text-xl font-black uppercase tracking-widest text-white/50">
             {selectedCategories.length > 0 || dbHiddenCategories.length > 0 ? "KDS (FILTRÉ)" : "KDS"}
           </span>
           {!missingIdError && (
-            <span className="text-[10px] xl:text-xs 2xl:text-lg font-bold bg-white/10 px-2 py-0.5 2xl:px-3 2xl:py-1 rounded-sm text-white/70">
-              {displayOrders.length} attente
+            <span className="text-[11px] xl:text-xs 2xl:text-lg font-bold bg-white/10 px-2 py-0.5 2xl:px-3 2xl:py-1 rounded-none text-white/80">
+              {allDisplayOrders.length} en cours
             </span>
           )}
+
+          {/* SÉLECTEUR DE PAGINATION SANS SCROLL */}
+          <div className="flex items-center bg-slate-900 border border-slate-700 rounded-none overflow-hidden shadow-inner ml-1">
+            <button
+              disabled={currentPage <= 1}
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              className="px-2 py-1 2xl:px-3 2xl:py-1.5 hover:bg-white/10 active:bg-white/20 disabled:opacity-30 disabled:hover:bg-transparent text-white transition-colors flex items-center justify-center cursor-pointer disabled:cursor-not-allowed"
+              title="Page précédente (Flèche gauche)"
+            >
+              <ChevronLeft className="w-4 h-4 2xl:w-6 2xl:h-6" />
+            </button>
+            <span className="px-2.5 py-0.5 font-black text-xs 2xl:text-base text-amber-400 tracking-wider">
+              {currentPage} / {totalPages}
+            </span>
+            <button
+              disabled={currentPage >= totalPages}
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              className="px-2 py-1 2xl:px-3 2xl:py-1.5 hover:bg-white/10 active:bg-white/20 disabled:opacity-30 disabled:hover:bg-transparent text-white transition-colors flex items-center justify-center cursor-pointer disabled:cursor-not-allowed"
+              title="Page suivante (Flèche droite)"
+            >
+              <ChevronRight className="w-4 h-4 2xl:w-6 2xl:h-6" />
+            </button>
+          </div>
+
+          <button 
+            onClick={() => setIsScheduledModalOpen(true)}
+            className={`px-2.5 py-1 2xl:px-4 2xl:py-1.5 rounded-none font-black text-xs 2xl:text-base uppercase flex items-center gap-2 transition-all cursor-pointer ${
+              futureScheduledCount > 0 
+                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md' 
+                : 'bg-white/5 hover:bg-white/10 text-white/70'
+            }`}
+            title="Voir les commandes programmées à l'avance"
+          >
+            <CalendarClock className="w-4 h-4 2xl:w-5 2xl:h-5" />
+            <span>Programmées</span>
+            {futureScheduledCount > 0 && (
+              <span className="bg-slate-950 text-amber-400 text-[10px] 2xl:text-xs px-1.5 py-0.2 rounded-none">
+                {futureScheduledCount}
+              </span>
+            )}
+          </button>
           
-          <button onClick={() => setIsHistoryOpen(true)} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded transition-colors relative ml-1 2xl:ml-3" title="Historique">
+          <button onClick={() => setIsHistoryOpen(true)} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded-none transition-colors relative ml-1" title="Historique">
             <History className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" />
             {historyOrders.length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-emerald-500 text-slate-900 text-[9px] 2xl:text-sm font-black px-1 2xl:px-2 rounded-sm">
+              <span className="absolute -top-1 -right-1 bg-emerald-500 text-slate-900 text-[9px] 2xl:text-sm font-black px-1 2xl:px-2 rounded-none">
                 {historyOrders.length}
               </span>
             )}
           </button>
 
-          <button onClick={toggleAudioStatus} className={`p-1.5 2xl:p-3 rounded ml-1 2xl:ml-3 cursor-pointer ${audioEnabled ? 'bg-emerald-500/10' : 'bg-red-500/10 animate-pulse'}`} title="Son">
+          <button onClick={toggleAudioStatus} className={`p-1.5 2xl:p-3 rounded-none ml-1 cursor-pointer transition-colors ${audioEnabled ? 'bg-emerald-500/10' : 'bg-red-500/10 animate-pulse'}`} title="Son">
             {audioEnabled ? <Volume2 className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" /> : <VolumeX className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" />}
           </button>
         </div>
 
         <div className="flex items-center gap-2 2xl:gap-4">
           <div className="w-px h-5 2xl:h-8 bg-white/20 mx-1 2xl:mx-3"></div>
-          <button onClick={() => { fetchOrders(); fetchHiddenOptions(); }} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded">
+          <button onClick={() => { fetchOrders(); fetchHiddenOptions(); }} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded-none transition-colors">
             <RefreshCcw className={`w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 ${isLoading ? "animate-spin text-primary/70" : "text-primary"}`} />
           </button>
-          <button onClick={() => setIsSettingsOpen(true)} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded">
+          <button onClick={() => setIsSettingsOpen(true)} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded-none transition-colors">
             <Settings className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" />
           </button>
           <HeaderClock />
@@ -799,166 +1121,166 @@ const KDS = () => {
           </div>
         </div>
       ) : (
-        <div className="flex-1 w-full overflow-y-auto bg-gray-200 custom-scrollbar">
-          <div className="grid grid-cols-5 w-full gap-0 auto-rows-max">
-            
-            {displayOrders.map((order) => {
+        /* GRILLE STRICTEMENT VERROUILLÉE À 5 COLONNES x 2 RANGÉES (ZÉRO TROU / ZÉRO ÉCRASEMENT) */
+        <div className="flex-1 w-full overflow-hidden bg-slate-950">
+          <div 
+            className="grid w-full h-full gap-0"
+            style={{
+              gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+              gridTemplateRows: 'repeat(2, minmax(0, 1fr))'
+            }}
+          >
+            {currentOrders.map((order) => {
               const status = order.status?.toLowerCase() || '';
               const isNewOrder = status === 'nouvelle';
-              const displaySlots = order._slots || 1; 
 
-              let colSpanClass = "col-span-1";
-              if (displaySlots === 5) { colSpanClass = "col-span-5"; }
-              else if (displaySlots === 4) { colSpanClass = "col-span-4"; }
-              else if (displaySlots === 3) { colSpanClass = "col-span-3"; }
-              else if (displaySlots === 2) { colSpanClass = "col-span-2"; }
-
-              let headerBgClass = 'bg-gray-500'; 
+              let headerBgClass = 'bg-gray-600'; 
               if (order.order_type_id === ORDER_TYPE_IDS.SUR_PLACE) {
-                headerBgClass = 'bg-orange-500'; 
+                headerBgClass = 'bg-[#E65100]'; 
               } else if (order.order_type_id === ORDER_TYPE_IDS.EMPORTER) {
-                headerBgClass = 'bg-[#b07d50]'; 
+                headerBgClass = 'bg-[#A0612D]'; 
               } else if (order.order_type_id === ORDER_TYPE_IDS.LIVRAISON) {
-                headerBgClass = 'bg-blue-400'; 
+                headerBgClass = 'bg-[#1976D2]'; 
               }
 
-              let borderClass = isNewOrder ? 'border-2 border-red-500 animate-alert' : 'border-r border-b border-gray-400';
+              const cardBorderClass = isNewOrder 
+                ? 'border-[2.5px] border-red-500 animate-alert z-20' 
+                : 'border-[2px] border-slate-900 z-10';
 
               return (
                 <div 
                   key={order.id} 
-                  className={`bg-gray-100 flex flex-col overflow-hidden rounded-none h-[46dvh] ${borderClass} ${colSpanClass}`}
+                  style={{
+                    gridRow: `${order.gridRow} / span ${order.rowSpan}`,
+                    gridColumn: `${order.gridCol} / span ${order.colSpan}`
+                  }}
+                  className={`bg-slate-100 flex flex-col overflow-hidden rounded-none h-full ${cardBorderClass}`}
                 >
-                  <div className={`${headerBgClass} p-1.5 2xl:p-3 flex justify-between items-center border-b border-black/20 flex-shrink-0 z-10`}>
-                    <div className="flex items-center gap-1 2xl:gap-2">
-                      {isNewOrder && <BellRing className="w-3 h-3 2xl:w-6 2xl:h-6 text-white animate-bounce" />}
+                  {/* EN-TÊTE DU TICKET */}
+                  <div className={`${headerBgClass} px-2 py-1.5 2xl:px-3 2xl:py-2 flex justify-between items-center border-b border-black/30 flex-shrink-0 z-10`}>
+                    <div className="flex items-center gap-1.5 2xl:gap-2">
+                      {isNewOrder && <BellRing className="w-3.5 h-3.5 2xl:w-6 2xl:h-6 text-white animate-bounce" />}
                       {getOrderTypeBadge(order.order_type_id)}
                     </div>
-                    <OrderTimer createdAt={order.created_at} now={now} />
-                    <div className="text-[13px] xl:text-lg 2xl:text-2xl font-black text-slate-900 bg-white px-1.5 2xl:px-3 rounded-sm">
+                    <OrderTimer 
+                      createdAt={order.created_at} 
+                      now={now} 
+                      scheduledTime={order.scheduled_time} 
+                      targetPrepMinutes={targetPrepMinutes}
+                    />
+                    <div className="text-[13px] xl:text-base 2xl:text-2xl font-black text-slate-900 bg-white px-2 py-0.5 2xl:px-2.5 rounded-none shadow-sm">
                       {order.order_number || `#${order.id.toString().slice(-3)}`}
                     </div>
                   </div>
 
-                  <div 
-                    className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar bg-gray-50 p-1"
-                    style={{ WebkitOverflowScrolling: 'touch' }}
-                  >
+                  {/* CONTENEUR DES ARTICLES */}
+                  <div className="flex-1 overflow-hidden bg-slate-50 p-0.5">
                     <div 
                       className="grid h-full" 
                       style={{ 
-                        gridTemplateColumns: `repeat(${displaySlots}, minmax(0, 1fr))`,
+                        gridTemplateColumns: `repeat(${order.colSpan}, minmax(0, 1fr))`,
                         gridAutoRows: '100%',
-                        gap: '0.25rem' 
+                        gap: '0px' 
                       }}
                     >
-                      {(() => {
-                        const flatLines: any[] = [];
-                        order.groupedItems.forEach((gItem: any) => {
-                          const itemKey = `${order.id}-${gItem.sig}`;
-                          
-                          // 1. Ligne Produit
-                          flatLines.push({
-                            id: `${itemKey}-prod`,
-                            isProduct: true,
-                            qty: gItem.qty,
-                            name: gItem.productName,
-                            sig: gItem.sig,
-                            itemKey,
-                            hasOptions: gItem.optionRows.length > 0
-                          });
-                          
-                          // 2. Lignes d'options
-                          gItem.optionRows.forEach((row: any, rIdx: number) => {
-                             flatLines.push({
-                                id: `${itemKey}-row-${rIdx}`,
-                                isProduct: false,
-                                items: row.items,
-                                isSans: row.isSans,
-                                sig: gItem.sig,
-                                itemKey,
-                                isLast: rIdx === gItem.optionRows.length - 1
-                             });
-                          });
-                        });
+                      {order.chunks.map((columnLines: any[], colIdx: number) => (
+                        <div 
+                          key={`col-${colIdx}`} 
+                          className={`grid w-full h-full px-0.5 ${colIdx > 0 ? 'border-l-2 border-dashed border-slate-300' : ''}`}
+                          style={{ gridTemplateRows: `repeat(${order.linesPerColumn}, minmax(0, 1fr))` }}
+                        >
+                          {columnLines.map((line: any, lineIdx: number) => {
+                            const isDone = !!doneItems[line.id];
+                            const isChunkFirst = lineIdx === 0;
+                            const isChunkLast = lineIdx === columnLines.length - 1;
 
-                        return chunkArrayByLines(flatLines, LINES_PER_COLUMN).map((columnLines, colIdx) => (
-                          <div 
-                            key={`col-${colIdx}`} 
-                            className="grid w-full h-full" 
-                            style={{ gridTemplateRows: 'repeat(7, minmax(0, 1fr))' }}
-                          >
-                            {columnLines.map((line: any, lineIdx: number) => {
-                              const isDone = !!doneItems[line.id];
-                              const isChunkFirst = lineIdx === 0;
-                              const isChunkLast = lineIdx === columnLines.length - 1;
-
-                              if (line.isProduct) {
-                                return (
-                                  <div 
-                                    key={line.id}
-                                    onClick={() => toggleItemDone(line.id)}
-                                    className={`min-h-0 w-full overflow-hidden flex items-center px-1.5 2xl:px-3 cursor-pointer transition-colors border-x border-gray-300 ${isChunkFirst ? 'border-t rounded-t-sm' : ''} ${(!line.hasOptions || isChunkLast) ? 'border-b rounded-b-sm shadow-sm' : 'border-b border-gray-200'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
-                                  >
-                                    <span className={`px-1 py-px 2xl:px-2 2xl:py-0.5 rounded-sm text-[10px] xl:text-[12px] 2xl:text-[18px] font-black mr-1 2xl:mr-2 flex-shrink-0 ${isDone ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-white'}`}>
-                                      {line.qty}x
-                                    </span>
-                                    <span className={`text-[10px] xl:text-[12px] 2xl:text-[18px] font-black uppercase leading-tight truncate ${isDone ? 'text-emerald-950' : 'text-slate-900'}`}>
-                                      {line.name}
-                                    </span>
-                                  </div>
-                                );
-                              } else {
-                                let bgClass = 'bg-slate-800';
-                                let textClass = 'text-white';
-                                let dividerClass = 'border-r border-white/30';
-                                
-                                if (isDone) {
-                                  bgClass = 'bg-emerald-400';
-                                  textClass = 'text-emerald-950';
-                                  dividerClass = 'border-r border-emerald-800/40';
-                                } else if (line.isSans) {
-                                  bgClass = 'bg-red-500';
-                                  textClass = 'text-white';
-                                  dividerClass = 'border-r border-white/40';
-                                }
-
-                                const itemsList = line.items && line.items.length > 0 ? line.items : [];
-
-                                return (
-                                  <div 
-                                    key={line.id} 
-                                    onClick={() => toggleItemDone(line.id)}
-                                    className={`min-h-0 w-full overflow-hidden flex items-stretch cursor-pointer transition-colors border-x border-gray-300 ${bgClass} ${isChunkFirst ? 'border-t rounded-t-sm' : ''} ${isChunkLast ? 'border-b rounded-b-sm shadow-sm' : 'border-b border-white/10'}`}
-                                  >
-                                    {itemsList.map((opt: any, optIdx: number) => (
-                                      <div 
-                                        key={optIdx} 
-                                        className={`flex-1 min-w-0 flex items-center justify-center text-center px-1.5 2xl:px-3 h-full ${optIdx < itemsList.length - 1 ? dividerClass : ''}`}
-                                      >
-                                        <span className={`text-[9px] xl:text-[11px] 2xl:text-[16px] font-black uppercase leading-tight truncate w-full ${textClass}`}>
-                                          {opt.qty > 1 ? `${opt.qty}x ` : ''}{opt.name}
-                                        </span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                );
+                            // 1. LIGNE PRODUIT
+                            if (line.isProduct) {
+                              return (
+                                <div 
+                                  key={line.id}
+                                  onClick={() => toggleItemDone(line.id)}
+                                  className={`min-h-0 w-full overflow-hidden flex items-center px-1.5 2xl:px-2.5 cursor-pointer transition-colors border-x border-slate-300 rounded-none ${isChunkFirst ? 'border-t' : ''} ${(!line.hasOptions || isChunkLast) ? 'border-b border-slate-400 shadow-sm' : 'border-b border-slate-200'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
+                                >
+                                  <span className={`px-1.5 py-0.5 rounded-none ${currentProductFont.qtyClass} font-black mr-1.5 2xl:mr-2 flex-shrink-0 leading-none ${isDone ? 'bg-emerald-700 text-white' : 'bg-slate-900 text-white'}`}>
+                                    {line.qty}x
+                                  </span>
+                                  <span className={`${currentProductFont.textClass} font-black uppercase leading-tight truncate ${isDone ? 'text-emerald-950' : 'text-slate-950'}`}>
+                                    {line.name}
+                                  </span>
+                                </div>
+                              );
+                            } 
+                            
+                            // 2. LIGNE OPTION
+                            else {
+                              let bgClass = (line.groupIdx % 2 === 0) ? 'bg-[#0f172a]' : 'bg-[#475569]';
+                              let textClass = 'text-white';
+                              let iconColor = (line.groupIdx % 2 === 0) ? 'text-amber-400' : 'text-cyan-300';
+                              let dividerClass = 'border-r border-white/20';
+                              
+                              if (isDone) {
+                                bgClass = 'bg-emerald-400';
+                                textClass = 'text-emerald-950';
+                                iconColor = 'text-emerald-950';
+                                dividerClass = 'border-r border-emerald-800/40';
+                              } else if (line.isSans) {
+                                bgClass = 'bg-red-600';
+                                textClass = 'text-white';
+                                iconColor = 'text-white';
+                                dividerClass = 'border-r border-white/30';
                               }
-                            })}
-                          </div>
-                        ));
-                      })()}
+
+                              const itemsList = line.items && line.items.length > 0 ? line.items : [];
+
+                              let optFontSizeClass = currentOptionFont.single;
+                              let optPaddingClass = "px-1.5 2xl:px-2";
+
+                              if (itemsList.length === 2) {
+                                optFontSizeClass = currentOptionFont.double;
+                                optPaddingClass = "px-1";
+                              } else if (itemsList.length >= 3) {
+                                optFontSizeClass = currentOptionFont.triple;
+                                optPaddingClass = "px-0.5";
+                              }
+
+                              return (
+                                <div 
+                                  key={line.id} 
+                                  onClick={() => toggleItemDone(line.id)}
+                                  className={`min-h-0 w-full overflow-hidden flex items-stretch cursor-pointer transition-colors border-x border-slate-300 rounded-none border-b border-black/40 ${bgClass} ${isChunkFirst ? 'border-t' : ''} ${isChunkLast ? 'shadow-sm' : ''}`}
+                                >
+                                  {itemsList.map((opt: any, optIdx: number) => (
+                                    <div 
+                                      key={optIdx} 
+                                      className={`flex-1 min-w-0 flex items-center justify-start ${optPaddingClass} h-full gap-1 ${optIdx < itemsList.length - 1 ? dividerClass : ''}`}
+                                    >
+                                      <span className={`text-[9px] xl:text-[10px] 2xl:text-[13px] font-black flex-shrink-0 leading-none ${iconColor}`}>
+                                        {opt.isSans ? '✕' : '+'}
+                                      </span>
+                                      <span className={`${optFontSizeClass} font-black uppercase leading-tight truncate w-full ${textClass}`}>
+                                        {opt.qty > 1 ? `${opt.qty}x ` : ''}{opt.name}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            }
+                          })}
+                        </div>
+                      ))}
                     </div>
                   </div>
 
-                  <div className="flex-shrink-0 border-t border-gray-300 z-10">
+                  {/* BOUTON D'ACTION INFÉRIEUR */}
+                  <div className="flex-shrink-0 border-t border-slate-900 z-10">
                     {isNewOrder ? (
-                      <button onClick={() => acceptOrder(order.id)} className="w-full bg-red-600 hover:bg-red-700 text-white font-black text-[11px] xl:text-sm 2xl:text-xl uppercase tracking-widest py-1.5 2xl:py-3 transition-colors flex justify-center items-center gap-1.5 2xl:gap-3 rounded-none">
+                      <button onClick={() => acceptOrder(order.id)} className="w-full bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white font-black text-[11px] xl:text-sm 2xl:text-xl uppercase tracking-widest py-1.5 2xl:py-3 transition-all flex justify-center items-center gap-1.5 2xl:gap-3 rounded-none">
                         <BellRing className="w-3.5 h-3.5 2xl:w-6 2xl:h-6" /> Accepter
                       </button>
                     ) : (
-                      <button onClick={() => markOrderAsReady(order.id)} className="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-900 font-black text-[11px] xl:text-sm 2xl:text-xl uppercase tracking-widest py-1.5 2xl:py-3 transition-colors flex justify-center items-center gap-1.5 2xl:gap-3 rounded-none">
-                        <CheckCircle2 className="w-3.5 h-3.5 2xl:w-6 2xl:h-6" strokeWidth={3} /> Prêt
+                      <button onClick={() => markOrderAsReady(order.id)} className="w-full bg-emerald-500 hover:bg-emerald-600 active:scale-[0.99] text-slate-900 font-black text-[11px] xl:text-sm 2xl:text-xl uppercase tracking-widest py-1.5 2xl:py-3 transition-all flex justify-center items-center gap-1.5 2xl:gap-3 rounded-none">
+                        <CheckCircle2 className="w-4 h-4 2xl:w-6 2xl:h-6" strokeWidth={3} /> Prêt
                       </button>
                     )}
                   </div>
@@ -968,6 +1290,15 @@ const KDS = () => {
           </div>
         </div>
       )}
+
+      {/* --- MODAL COMMANDES PROGRAMMÉES --- */}
+      <ScheduledOrdersModal
+        isOpen={isScheduledModalOpen}
+        onClose={() => setIsScheduledModalOpen(false)}
+        orders={orders.filter(o => isActiveForKDS(o.status))}
+        onForceSendToKitchen={handleForceSendToKitchen}
+        themeColors={themeColors}
+      />
 
       {/* --- MODAL HISTORIQUE --- */}
       {isHistoryOpen && (
@@ -991,7 +1322,7 @@ const KDS = () => {
                       <div>
                         <div className="flex items-center gap-2 2xl:gap-4 mb-1 2xl:mb-3">
                           <span className="font-black text-sm 2xl:text-2xl text-white">{order.order_number || `#${order.id.toString().slice(-3)}`}</span>
-                          <span className={`px-1.5 py-0.5 2xl:px-3 2xl:py-1 text-[9px] 2xl:text-sm font-black uppercase ${isClosed ? 'bg-white/10 text-white/50' : 'bg-emerald-500/20 text-emerald-400'}`}>{order.status}</span>
+                          <span className={`px-2 py-0.5 2xl:px-3 2xl:py-1 text-[9px] 2xl:text-sm font-black uppercase rounded-none ${isClosed ? 'bg-white/10 text-white/50' : 'bg-emerald-500/20 text-emerald-400'}`}>{order.status}</span>
                         </div>
                         <div className="text-[11px] 2xl:text-lg text-white/60">
                           {items.filter(Boolean).map((i: any) => `${i.quantity || 1}x ${i.product?.name || i.name || 'Article'}`).join(' • ')}
@@ -1031,19 +1362,63 @@ const KDS = () => {
                 </div>
               )}
 
+              {/* 1. TAILLE POLICE PRODUIT */}
+              <div className="border-t border-white/10 pt-4 2xl:pt-6">
+                <h3 className="text-xs 2xl:text-xl font-black uppercase text-white mb-3 flex items-center gap-1.5 2xl:gap-3">
+                  <Type className="w-3.5 h-3.5 2xl:w-6 2xl:h-6 text-amber-500"/> Taille police des produits
+                </h3>
+                <div className="grid grid-cols-4 gap-2 2xl:gap-3">
+                  {Object.entries(PRODUCT_FONT_CONFIGS).map(([key, cfg]) => (
+                    <button
+                      key={key}
+                      onClick={() => handleChangeProductFontSize(key)}
+                      className={`py-2 2xl:py-3 px-2 font-black text-[11px] 2xl:text-base uppercase rounded-none transition-colors border ${
+                        productFontSize === key
+                          ? 'bg-amber-500 text-slate-900 border-amber-500'
+                          : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
+                      }`}
+                    >
+                      {cfg.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. TAILLE POLICE OPTIONS */}
+              <div className="border-t border-white/10 pt-4 2xl:pt-6">
+                <h3 className="text-xs 2xl:text-xl font-black uppercase text-white mb-3 flex items-center gap-1.5 2xl:gap-3">
+                  <Type className="w-3.5 h-3.5 2xl:w-6 2xl:h-6 text-cyan-400"/> Taille police des options
+                </h3>
+                <div className="grid grid-cols-3 gap-2 2xl:gap-3">
+                  {Object.entries(OPTION_FONT_CONFIGS).map(([key, cfg]) => (
+                    <button
+                      key={key}
+                      onClick={() => handleChangeOptionFontSize(key)}
+                      className={`py-2 2xl:py-3 px-2 font-black text-[11px] 2xl:text-base uppercase rounded-none transition-colors border ${
+                        optionFontSize === key
+                          ? 'bg-cyan-400 text-slate-900 border-cyan-400'
+                          : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
+                      }`}
+                    >
+                      {cfg.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* DISPOSITION DES OPTIONS KDS */}
               <div className="border-t border-white/10 pt-4 2xl:pt-6">
                 <h3 className="text-xs 2xl:text-xl font-black uppercase text-white mb-2 2xl:mb-4 flex items-center gap-1.5 2xl:gap-3">
                   <LayoutGrid className="w-3.5 h-3.5 2xl:w-6 2xl:h-6 text-amber-500"/> Disposition des options
                 </h3>
-                <div className="flex items-center justify-between bg-white/5 p-3 2xl:p-5 border border-white/10">
+                <div className="flex items-center justify-between bg-white/5 p-3 2xl:p-5 border border-white/10 rounded-none">
                   <div className="pr-4">
                     <div className="text-xs 2xl:text-lg font-bold text-white uppercase">
                       Grouper les options d'un même groupe
                     </div>
                     <div className="text-[10px] 2xl:text-sm text-white/50 mt-0.5">
                       {groupOptionsInline 
-                        ? "Activé : Les options d'un même groupe s'affichent côte à côte (ex: 2 sauces sur la même ligne)." 
+                        ? "Activé : Les options d'un même groupe s'affichent côte à côte avec police auto-adaptée." 
                         : "Désactivé : Chaque option occupe sa propre ligne pleine largeur (lisibilité maximale)."}
                     </div>
                   </div>
