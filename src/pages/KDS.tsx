@@ -1551,9 +1551,13 @@ const KDS = () => {
   const currentProductFont = PRODUCT_FONT_CONFIGS[productFontSize] || PRODUCT_FONT_CONFIGS.normal;
   const currentOptionFont = OPTION_FONT_CONFIGS[optionFontSize] || OPTION_FONT_CONFIGS.normal;
 
-  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-  const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
-  const mobilePairUrl = `${currentOrigin}${currentPath}#/pair?code=${pairingCode}&type=kds`;
+  const ADMIN_PROD_URL = import.meta.env.VITE_ADMIN_URL || 'https://project1-ft65s6zuh-yass13000s-projects.vercel.app';
+  const currentHostname = typeof window !== 'undefined' ? window.location.hostname : '';
+  const isLocal = currentHostname === 'localhost' || currentHostname === '127.0.0.1' || currentHostname.startsWith('192.168.');
+  const adminBaseUrl = isLocal 
+    ? ADMIN_PROD_URL 
+    : (typeof window !== 'undefined' ? window.location.origin : '');
+  const mobilePairUrl = `${adminBaseUrl}/pair?code=${pairingCode}&type=kds`;
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(mobilePairUrl)}&margin=10`;
 
   return (
