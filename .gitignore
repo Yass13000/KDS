@@ -5,7 +5,10 @@ node_modules/
 
 # Production
 dist/
-build/
+build/*
+!build/icon.ico
+!build/icon.icns
+!build/icon.png
 
 # Electron
 release/

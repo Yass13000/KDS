@@ -17,10 +17,15 @@ function createWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width, height } = primaryDisplay.bounds;
 
+  const iconPath = process.platform === 'win32'
+    ? path.join(__dirname, '../build/icon.ico')
+    : path.join(__dirname, '../build/icon.png');
+
   // Créer la fenêtre du navigateur
   mainWindow = new BrowserWindow({
     width,
     height,
+    icon: iconPath,
     ...KIOSK_CONFIG,
     backgroundColor: '#1a1410', // Couleur de fond pendant le chargement
     webPreferences: {

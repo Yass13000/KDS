@@ -1,57 +1,109 @@
 {
-  "name": "KDS - Commande en ligne",
-  "short_name": "KDS",
-  "description": "Application KDS - commande en ligne de vos produits préférés",
-  "start_url": "/",
+  "$schema": "https://json.schemastore.org/web-manifest-combined.json",
+  "id": "/?source=pwa",
+  "name": "KDS - Écran Cuisine & Commandes",
+  "short_name": "KDS Cuisine",
+  "description": "Système d'affichage cuisine (KDS) en temps réel et gestion des commandes pour restaurant.",
+  "lang": "fr-FR",
+  "dir": "ltr",
+  "start_url": "/?source=pwa",
   "scope": "/",
-  "display": "fullscreen",
-  "display_override": ["fullscreen", "standalone"],
-  "orientation": "portrait-primary",
-  "background_color": "#0f5426",
-  "theme_color": "#0f5426",
-  "lang": "fr",
-  "categories": ["food", "business"],
+  "display": "standalone",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "any",
+  "theme_color": "#0F172A",
+  "background_color": "#0F172A",
+  "categories": [
+    "food",
+    "business",
+    "productivity",
+    "utilities"
+  ],
   "prefer_related_applications": false,
   "icons": [
     {
-      "src": "/iconmob.png",
+      "src": "/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/maskable-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/maskable-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "/iconmob.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
     }
   ],
   "shortcuts": [
     {
-      "name": "Menu",
-      "short_name": "Menu",
-      "description": "Voir le menu",
-      "url": "/menu",
+      "name": "Écran Cuisine (KDS)",
+      "short_name": "KDS",
+      "description": "Accès direct au tableau d'affichage cuisine en direct",
+      "url": "/?source=pwa_shortcut#/kds",
       "icons": [
         {
-          "src": "/iconmob.png",
-          "sizes": "192x192",
+          "src": "/shortcut-kds-96x96.png",
+          "sizes": "96x96",
           "type": "image/png"
         }
       ]
     },
     {
-      "name": "Panier",
-      "short_name": "Panier",
-      "description": "Voir le panier",
-      "url": "/cart",
+      "name": "Historique des Commandes",
+      "short_name": "Historique",
+      "description": "Consulter les commandes en cours et traitées",
+      "url": "/?source=pwa_shortcut_orders#/kds",
       "icons": [
         {
-          "src": "/iconmob.png",
-          "sizes": "192x192",
+          "src": "/shortcut-orders-96x96.png",
+          "sizes": "96x96",
           "type": "image/png"
         }
       ]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/desktop-preview.webp",
+      "sizes": "1920x1080",
+      "type": "image/webp",
+      "form_factor": "wide",
+      "label": "Interface KDS bureau plein écran optimisée avec Window Controls Overlay"
+    },
+    {
+      "src": "/screenshots/mobile-preview.webp",
+      "sizes": "1080x1920",
+      "type": "image/webp",
+      "form_factor": "narrow",
+      "label": "Interface tactile fluide pour tablette et mobile"
     }
   ]
 }

@@ -1,27 +1,31 @@
 // @ts-nocheck
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { 
   Clock, 
   CheckCircle2, 
-  Timer,
-  BellRing,
-  AlertTriangle,
-  RefreshCcw,
-  Settings,
-  X,
-  History,
-  RotateCcw,
-  Volume2,
-  VolumeX,
-  WifiOff,
-  Filter,
-  LayoutGrid,
-  Type,
-  CalendarClock,
-  ChevronLeft,
-  ChevronRight
+  Timer, 
+  BellRing, 
+  RefreshCcw, 
+  Settings, 
+  X, 
+  History, 
+  RotateCcw, 
+  Volume2, 
+  VolumeX, 
+  WifiOff, 
+  Filter, 
+  LayoutGrid, 
+  Type, 
+  CalendarClock, 
+  ChevronLeft, 
+  ChevronRight, 
+  Smartphone, 
+  Monitor, 
+  QrCode, 
+  KeyRound, 
+  Unlink 
 } from 'lucide-react';
 import { getFormattedOrderOptions, fetchOptionGroupMapping } from '@/lib/orderFormatter';
 import { ScheduledOrdersModal } from '@/components/ScheduledOrdersModal';
@@ -32,8 +36,6 @@ const ORDER_TYPE_IDS = {
   LIVRAISON: 'c48b80a4-0dcd-4f75-9e67-a99d30bf4f9d'
 };
 
-const LINES_PER_SINGLE_ROW = 7; 
-const LINES_PER_DOUBLE_ROW = 15; 
 const SCHEDULED_THRESHOLD_MINUTES = 30;
 
 export const isRealScheduledOrder = (order: any, now: Date) => {
@@ -48,31 +50,48 @@ export const isRealScheduledOrder = (order: any, now: Date) => {
   return diffFromCreation > 30 && diffFromNow > SCHEDULED_THRESHOLD_MINUTES;
 };
 
+// POLICES FLUIDES ADAPTÉES AU VIEWPORT (ZÉRO PX FIXE)
 const PRODUCT_FONT_CONFIGS: Record<string, { label: string; textClass: string; qtyClass: string }> = {
-  small: { label: 'Petite', textClass: 'text-[9.5px] xl:text-[11.5px] 2xl:text-[16px]', qtyClass: 'text-[9px] xl:text-[11px] 2xl:text-[15px]' },
-  normal: { label: 'Normale', textClass: 'text-[11px] xl:text-[13px] 2xl:text-[18px]', qtyClass: 'text-[10px] xl:text-[12px] 2xl:text-[17px]' },
-  large: { label: 'Grande', textClass: 'text-[12.5px] xl:text-[14.5px] 2xl:text-[20px]', qtyClass: 'text-[11px] xl:text-[13px] 2xl:text-[18px]' },
-  xlarge: { label: 'Très grande', textClass: 'text-[14px] xl:text-[16px] 2xl:text-[22px]', qtyClass: 'text-[12px] xl:text-[14px] 2xl:text-[19px]' }
+  small: { 
+    label: 'Petite', 
+    textClass: 'text-[clamp(12px,1.3vh,18px)] leading-tight', 
+    qtyClass: 'text-[clamp(11px,1.2vh,16px)]' 
+  },
+  normal: { 
+    label: 'Normale', 
+    textClass: 'text-[clamp(14px,1.65vh,23px)] leading-tight', 
+    qtyClass: 'text-[clamp(13px,1.45vh,20px)]' 
+  },
+  large: { 
+    label: 'Grande', 
+    textClass: 'text-[clamp(16px,1.95vh,27px)] leading-tight', 
+    qtyClass: 'text-[clamp(15px,1.75vh,23px)]' 
+  },
+  xlarge: { 
+    label: 'Très grande', 
+    textClass: 'text-[clamp(18px,2.3vh,32px)] leading-tight', 
+    qtyClass: 'text-[clamp(17px,2.05vh,27px)]' 
+  }
 };
 
 const OPTION_FONT_CONFIGS: Record<string, { label: string; single: string; double: string; triple: string }> = {
   small: {
     label: 'Petite',
-    single: 'text-[8.5px] xl:text-[10px] 2xl:text-[14px]',
-    double: 'text-[7.5px] xl:text-[8.5px] 2xl:text-[12px] tracking-tight',
-    triple: 'text-[6.5px] xl:text-[7.5px] 2xl:text-[10px] tracking-tighter leading-none'
+    single: 'text-[clamp(11px,1.2vh,16px)] leading-tight',
+    double: 'text-[clamp(10px,1.1vh,15px)] tracking-tight leading-tight',
+    triple: 'text-[clamp(9.5px,1.0vh,13.5px)] tracking-tighter leading-none'
   },
   normal: {
     label: 'Normale',
-    single: 'text-[9.5px] xl:text-[11.5px] 2xl:text-[16px]',
-    double: 'text-[8.5px] xl:text-[9.5px] 2xl:text-[13px] tracking-tight',
-    triple: 'text-[7px] xl:text-[8px] 2xl:text-[11px] tracking-tighter leading-none'
+    single: 'text-[clamp(13px,1.45vh,19px)] leading-tight',
+    double: 'text-[clamp(11.5px,1.25vh,17px)] tracking-tight leading-tight',
+    triple: 'text-[clamp(10.5px,1.15vh,15px)] tracking-tighter leading-none'
   },
   large: {
     label: 'Grande',
-    single: 'text-[11px] xl:text-[13px] 2xl:text-[18px]',
-    double: 'text-[9.5px] xl:text-[11px] 2xl:text-[15px] tracking-tight',
-    triple: 'text-[8px] xl:text-[9px] 2xl:text-[12.5px] tracking-tighter leading-none'
+    single: 'text-[clamp(15px,1.7vh,23px)] leading-tight',
+    double: 'text-[clamp(13.5px,1.45vh,19px)] tracking-tight leading-tight',
+    triple: 'text-[clamp(12px,1.3vh,17px)] tracking-tighter leading-none'
   }
 };
 
@@ -103,16 +122,20 @@ const parseOrderDetails = (details: any): any[] => {
       if (Array.isArray(parsed)) return parsed;
       if (parsed && Array.isArray(parsed.items)) return parsed.items;
       return [parsed];
-    } catch (e) { return []; }
+    } catch { return []; }
   }
   return [];
 };
 
+// EXTRACTION DES LIGNES D'OPTIONS AVEC SORT_KDS ET NAME_KDS
 const extractOptionLinesForKDS = (
   item: any, 
   hiddenOptionNames: string[] = [], 
   groupMapping: Record<string, string> = {},
-  groupInline: boolean = true
+  groupInline: boolean = true,
+  groupSortDict: Record<string, number> = {},
+  optionNameKdsDict: Record<string, string> = {},
+  productKdsDict: Record<string, string> = {}
 ) => {
   const isHidden = (name: string) => {
     if (!name || typeof name !== 'string') return false;
@@ -124,13 +147,37 @@ const extractOptionLinesForKDS = (
     });
   };
 
+  const getOptionDisplayName = (opt: any): string => {
+    if (!opt) return '';
+    if (opt.name_kds && String(opt.name_kds).trim()) {
+      return String(opt.name_kds).trim();
+    }
+    const rawName = opt.name || '';
+    const normName = normalizeText(rawName);
+    const cleanNormName = normName.replace(/^sans\s+/, '');
+
+    // 1. Recherche dans les options classiques
+    if (optionNameKdsDict[normName]) return optionNameKdsDict[normName];
+    if (cleanNormName && optionNameKdsDict[cleanNormName]) return optionNameKdsDict[cleanNormName];
+
+    // 2. Recherche dans les produits utilisés comme options (boissons / desserts de menu)
+    const optId = (opt.id || opt.product_id || '').toString().trim();
+    const baseOptId = optId.includes('-') ? optId.split('-')[0] : optId;
+    if (baseOptId && productKdsDict[baseOptId]) return productKdsDict[baseOptId];
+    if (optId && productKdsDict[optId]) return productKdsDict[optId];
+    if (normName && productKdsDict[normName]) return productKdsDict[normName];
+    if (cleanNormName && productKdsDict[cleanNormName]) return productKdsDict[cleanNormName];
+
+    return rawName;
+  };
+
   const resultRows: { items: { name: string; qty: number; isSans: boolean }[]; isSans: boolean; groupIdx: number }[] = [];
   let groupCounter = 0;
 
   const optionGroups = getFormattedOrderOptions(item, groupMapping);
 
   const sansItems: { name: string; qty: number; isSans: boolean }[] = [];
-  const normalGroups: { groupName: string; items: { name: string; qty: number; isSans: boolean }[] }[] = [];
+  const normalGroups: { groupName: string; sortOrder: number; items: { name: string; qty: number; isSans: boolean }[] }[] = [];
 
   optionGroups.forEach(grp => {
     if ((grp.originalGroupName && isHidden(grp.originalGroupName)) || (grp.groupName && isHidden(grp.groupName))) {
@@ -141,20 +188,32 @@ const extractOptionLinesForKDS = (
     if (validItems.length === 0) return;
 
     validItems.forEach(opt => {
+      const displayName = getOptionDisplayName(opt);
       if (opt.isSans || grp.originalGroupName === 'INGRÉDIENTS') {
-        sansItems.push({ name: opt.name, qty: opt.qty || 1, isSans: true });
+        const cleanSansName = displayName.replace(/^sans\s+/i, '');
+        sansItems.push({ name: cleanSansName, qty: opt.qty || 1, isSans: true });
       }
     });
 
     const nonSansItems = validItems.filter(opt => !opt.isSans && grp.originalGroupName !== 'INGRÉDIENTS');
     if (nonSansItems.length > 0) {
+      const rawGroupName = grp.originalGroupName || grp.groupName || '';
+      const normGroupName = normalizeText(rawGroupName);
+      const sortOrder = groupSortDict[normGroupName] ?? 999;
+
       normalGroups.push({
-        groupName: grp.originalGroupName || grp.groupName || '',
-        items: nonSansItems.map(opt => ({ name: opt.name, qty: opt.qty || 1, isSans: false }))
+        groupName: rawGroupName,
+        sortOrder,
+        items: nonSansItems.map(opt => ({ 
+          name: getOptionDisplayName(opt), 
+          qty: opt.qty || 1, 
+          isSans: false 
+        }))
       });
     }
   });
 
+  // Ingrédients retirés ("✕ ...") affichés en tête
   if (sansItems.length > 0) {
     if (groupInline) {
       for (let i = 0; i < sansItems.length; i += 2) {
@@ -166,6 +225,9 @@ const extractOptionLinesForKDS = (
       });
     }
   }
+
+  // Tri des groupes selon sort_kds
+  normalGroups.sort((a, b) => a.sortOrder - b.sortOrder);
 
   normalGroups.forEach(grp => {
     const currentIdx = groupCounter++;
@@ -184,7 +246,7 @@ const extractOptionLinesForKDS = (
 };
 
 const isActiveForKDS = (status: string) => {
-  const s = status?.toLowerCase() || '';
+  const s = status?.trim().toLowerCase() || '';
   if (s === 'prête' || s === 'prete' || s === 'prêt' || s === 'pret') return false;
   if (s === 'fermé' || s === 'ferme' || s === 'terminée' || s === 'terminee') return false;
   if (s === 'annulée' || s === 'annulee') return false; 
@@ -198,8 +260,8 @@ const HeaderClock = () => {
     return () => clearInterval(timer);
   }, []);
   return (
-    <div className="text-xs xl:text-sm 2xl:text-xl font-bold tracking-widest text-white/80 flex items-center gap-1.5 ml-2">
-      <Clock className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" />
+    <div className="text-[clamp(13px,1.55vh,19px)] font-black tracking-widest text-white/90 flex items-center gap-2 ml-1">
+      <Clock className="w-[2.2vh] h-[2.2vh] min-w-[20px] min-h-[20px] text-primary" />
       {time.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
     </div>
   );
@@ -229,10 +291,10 @@ const OrderTimer = ({
     const text = `${isLate ? 'RETARD ' : 'DANS '}${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
     return (
-      <div className={`flex items-center gap-1 px-1.5 py-0.5 2xl:px-3 2xl:py-1 rounded-none border font-black text-[11px] xl:text-sm 2xl:text-xl tracking-wider transition-all ${
+      <div className={`flex items-center gap-1 px-[0.6vw] py-[0.3vh] rounded-none border font-black text-[clamp(11px,1.3vh,18px)] tracking-wider transition-all ${
         isLate ? 'bg-red-600 text-white animate-pulse border-red-400' : 'bg-purple-600 text-white border-transparent'
       }`}>
-        <CalendarClock className="w-3 h-3 xl:w-4 xl:h-4 2xl:w-6 2xl:h-6" /> {text}
+        <CalendarClock className="w-[1.5vh] h-[1.5vh]" /> {text}
       </div>
     );
   }
@@ -251,8 +313,8 @@ const OrderTimer = ({
       : 'bg-black/20 text-white border-transparent';
 
     return (
-      <div className={`flex items-center gap-1 px-1.5 py-0.5 2xl:px-3 2xl:py-1 rounded-none border font-black text-[11px] xl:text-sm 2xl:text-xl tracking-wider transition-all ${timeColorClass}`}>
-        <Timer className="w-3 h-3 xl:w-4 xl:h-4 2xl:w-6 2xl:h-6" /> {text}
+      <div className={`flex items-center gap-1 px-[0.6vw] py-[0.3vh] rounded-none border font-black text-[clamp(11px,1.3vh,18px)] tracking-wider transition-all ${timeColorClass}`}>
+        <Timer className="w-[1.5vh] h-[1.5vh]" /> {text}
       </div>
     );
   } else {
@@ -262,16 +324,49 @@ const OrderTimer = ({
     const text = `+${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
     return (
-      <div className="flex items-center gap-1 px-1.5 py-0.5 2xl:px-3 2xl:py-1 rounded-none border font-black text-[11px] xl:text-sm 2xl:text-xl tracking-wider transition-all bg-red-600 text-white animate-pulse border-red-400">
-        <Timer className="w-3 h-3 xl:w-4 xl:h-4 2xl:w-6 2xl:h-6" /> {text}
+      <div className="flex items-center gap-1 px-[0.6vw] py-[0.3vh] rounded-none border font-black text-[clamp(11px,1.3vh,18px)] tracking-wider transition-all bg-red-600 text-white animate-pulse border-red-400">
+        <Timer className="w-[1.5vh] h-[1.5vh]" /> {text}
       </div>
     );
   }
 };
 
-// 🟢 ALGORITHME ZÉRO-TROU (Smart Column Backfill)
-// Scanne colonne par colonne (Col 1 Haut, Col 1 Bas, Col 2 Haut, Col 2 Bas...) pour combler immédiatement les cases libres
-const paginateNoHoles = (orders: any[]) => {
+// ==========================================
+// ALGORITHMES DE PLACEMENT
+// ==========================================
+
+const paginate5x1 = (orders: any[]) => {
+  if (!orders || orders.length === 0) return [[]];
+  const pages: any[][] = [];
+  const TOTAL_COLS = 5;
+
+  let currentPage: any[] = [];
+  let currentUsedCols = 0;
+
+  orders.forEach(order => {
+    const cSpan = Math.min(TOTAL_COLS, order.colSpan || 1);
+
+    if (currentUsedCols + cSpan > TOTAL_COLS) {
+      if (currentPage.length > 0) pages.push(currentPage);
+      currentPage = [];
+      currentUsedCols = 0;
+    }
+
+    currentPage.push({
+      ...order,
+      gridColStart: currentUsedCols + 1,
+      gridRowStart: 1,
+      rowSpan: 1,
+      colSpan: cSpan
+    });
+    currentUsedCols += cSpan;
+  });
+
+  if (currentPage.length > 0) pages.push(currentPage);
+  return pages.length > 0 ? pages : [[]];
+};
+
+const paginate5x2 = (orders: any[]) => {
   if (!orders || orders.length === 0) return [[]];
   const pages: any[][] = [];
   const ROWS = 2;
@@ -299,19 +394,20 @@ const paginateNoHoles = (orders: any[]) => {
   };
 
   orders.forEach(order => {
-    const rSpan = Math.min(2, order.rowSpan || 1);
+    const rSpan = Math.min(ROWS, order.rowSpan || 1);
     const cSpan = Math.min(COLS, order.colSpan || 1);
     let placed = false;
 
-    // Balayage en priorité de colonne : teste Col 0 Haut, Col 0 Bas, Col 1 Haut, Col 1 Bas...
     for (let c = 0; c <= COLS - cSpan; c++) {
       for (let r = 0; r <= ROWS - rSpan; r++) {
         if (canPlace(currentGrid, r, c, rSpan, cSpan)) {
           place(currentGrid, r, c, rSpan, cSpan);
           currentPage.push({
             ...order,
-            gridRow: r + 1,
-            gridCol: c + 1
+            gridRowStart: r + 1,
+            gridColStart: c + 1,
+            rowSpan: rSpan,
+            colSpan: cSpan
           });
           placed = true;
           break;
@@ -320,11 +416,8 @@ const paginateNoHoles = (orders: any[]) => {
       if (placed) break;
     }
 
-    // Si aucune place sur la page courante, nouvelle page
     if (!placed) {
-      if (currentPage.length > 0) {
-        pages.push(currentPage);
-      }
+      if (currentPage.length > 0) pages.push(currentPage);
       currentGrid = Array(ROWS).fill(null).map(() => Array(COLS).fill(false));
       currentPage = [];
 
@@ -334,8 +427,10 @@ const paginateNoHoles = (orders: any[]) => {
             place(currentGrid, r, c, rSpan, cSpan);
             currentPage.push({
               ...order,
-              gridRow: r + 1,
-              gridCol: c + 1
+              gridRowStart: r + 1,
+              gridColStart: c + 1,
+              rowSpan: rSpan,
+              colSpan: cSpan
             });
             placed = true;
             break;
@@ -347,17 +442,105 @@ const paginateNoHoles = (orders: any[]) => {
       if (!placed) {
         currentPage.push({
           ...order,
-          gridRow: 1,
-          gridCol: 1
+          gridRowStart: 1,
+          gridColStart: 1,
+          rowSpan: 1,
+          colSpan: 1
         });
       }
     }
   });
 
-  if (currentPage.length > 0) {
-    pages.push(currentPage);
-  }
+  if (currentPage.length > 0) pages.push(currentPage);
+  return pages.length > 0 ? pages : [[]];
+};
 
+const paginatePortrait = (orders: any[]) => {
+  if (!orders || orders.length === 0) return [[]];
+  const pages: any[][] = [];
+  const ROWS = 3;
+  const COLS = 2;
+
+  let currentGrid = Array(ROWS).fill(null).map(() => Array(COLS).fill(false));
+  let currentPage: any[] = [];
+
+  const canPlace = (grid: boolean[][], r: number, c: number, rSpan: number, cSpan: number) => {
+    if (r + rSpan > ROWS || c + cSpan > COLS) return false;
+    for (let dr = 0; dr < rSpan; dr++) {
+      for (let dc = 0; dc < cSpan; dc++) {
+        if (grid[r + dr][c + dc]) return false;
+      }
+    }
+    return true;
+  };
+
+  const place = (grid: boolean[][], r: number, c: number, rSpan: number, cSpan: number) => {
+    for (let dr = 0; dr < rSpan; dr++) {
+      for (let dc = 0; dc < cSpan; dc++) {
+        grid[r + dr][c + dc] = true;
+      }
+    }
+  };
+
+  orders.forEach(order => {
+    const rSpan = Math.min(ROWS, order.rowSpan || 1);
+    const cSpan = Math.min(COLS, order.colSpan || 1);
+    let placed = false;
+
+    for (let r = 0; r <= ROWS - rSpan; r++) {
+      for (let c = 0; c <= COLS - cSpan; c++) {
+        if (canPlace(currentGrid, r, c, rSpan, cSpan)) {
+          place(currentGrid, r, c, rSpan, cSpan);
+          currentPage.push({
+            ...order,
+            gridRowStart: r + 1,
+            gridColStart: c + 1,
+            rowSpan: rSpan,
+            colSpan: cSpan
+          });
+          placed = true;
+          break;
+        }
+      }
+      if (placed) break;
+    }
+
+    if (!placed) {
+      if (currentPage.length > 0) pages.push(currentPage);
+      currentGrid = Array(ROWS).fill(null).map(() => Array(COLS).fill(false));
+      currentPage = [];
+
+      for (let r = 0; r <= ROWS - rSpan; r++) {
+        for (let c = 0; c <= COLS - cSpan; c++) {
+          if (canPlace(currentGrid, r, c, rSpan, cSpan)) {
+            place(currentGrid, r, c, rSpan, cSpan);
+            currentPage.push({
+              ...order,
+              gridRowStart: r + 1,
+              gridColStart: c + 1,
+              rowSpan: rSpan,
+              colSpan: cSpan
+            });
+            placed = true;
+            break;
+          }
+        }
+        if (placed) break;
+      }
+
+      if (!placed) {
+        currentPage.push({
+          ...order,
+          gridRowStart: 1,
+          gridColStart: 1,
+          rowSpan: 1,
+          colSpan: 1
+        });
+      }
+    }
+  });
+
+  if (currentPage.length > 0) pages.push(currentPage);
   return pages.length > 0 ? pages : [[]];
 };
 
@@ -370,21 +553,107 @@ const KDS = () => {
   }, []);
 
   const [orders, setOrders] = useState<any[]>([]);
-  const [missingIdError, setMissingIdError] = useState(false);
+  const [, setMissingIdError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [showAudioUnlock, setShowAudioUnlock] = useState(true);
-
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   
-  const [activeRestoId, setActiveRestoId] = useState(localStorage.getItem('pos_restaurant_id') || '');
+  const [activeRestoId, setActiveRestoId] = useState(() => {
+    return localStorage.getItem('pos_restaurant_id') || 
+           localStorage.getItem('admin_override_restaurant_id') || 
+           '';
+  });
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isScheduledModalOpen, setIsScheduledModalOpen] = useState(false);
   
+  const generateRandomPairingCode = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
+  };
+
+  const [pairingCode, setPairingCode] = useState<string>(() => generateRandomPairingCode());
+  const [deviceId] = useState<string>(() => {
+    let id = localStorage.getItem('kds_device_id');
+    if (!id) {
+      id = `kds_${Math.random().toString(36).substring(2, 10)}_${Date.now().toString(36)}`;
+      localStorage.setItem('kds_device_id', id);
+    }
+    return id;
+  });
+
+  const [isUnlinkModalOpen, setIsUnlinkModalOpen] = useState(false);
+  const [unlinkPin, setUnlinkPin] = useState('');
+  const [unlinkError, setUnlinkError] = useState('');
+
+  const handlePairSuccess = useCallback((restoId: string) => {
+    if (!restoId) return;
+    const cleanId = String(restoId).trim();
+    localStorage.setItem('pos_restaurant_id', cleanId);
+    localStorage.setItem('admin_override_restaurant_id', cleanId);
+    setTempRestoId(cleanId);
+    setActiveRestoId(cleanId);
+    setMissingIdError(false);
+    setIsSettingsOpen(false);
+    setAdminUnlockCount(0);
+    toast.success("Écran KDS appairé avec succès !");
+  }, []);
+
+  const handleConfirmUnlink = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (unlinkPin === '1234') {
+      localStorage.removeItem('pos_restaurant_id');
+      localStorage.removeItem('admin_override_restaurant_id');
+      setActiveRestoId('');
+      setTempRestoId('');
+      setMissingIdError(true);
+      setOrders([]);
+      setIsUnlinkModalOpen(false);
+      setUnlinkPin('');
+      setUnlinkError('');
+      setIsSettingsOpen(false);
+      setAdminUnlockCount(0);
+      setPairingCode(generateRandomPairingCode());
+      toast.success("Écran KDS dissocié avec succès");
+    } else {
+      setUnlinkError("Code PIN incorrect (requis : 1234)");
+    }
+  };
+
   const [forcedOrderIds, setForcedOrderIds] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState<number>(1);
+
+  const [isPortrait, setIsPortrait] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerHeight > window.innerWidth;
+    }
+    return false;
+  });
+
+  const [landscapeLayoutMode, setLandscapeLayoutMode] = useState<'5x1' | '5x2'>(() => {
+    return (localStorage.getItem('kds_layout_mode') as '5x1' | '5x2') || '5x1';
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsPortrait(window.innerHeight > window.innerWidth);
+    };
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+    };
+  }, []);
+
+  const activeLayoutMode = isPortrait ? 'portrait' : landscapeLayoutMode;
 
   const [tempRestoId, setTempRestoId] = useState(activeRestoId);
   const [adminUnlockCount, setAdminUnlockCount] = useState(0);
@@ -406,6 +675,8 @@ const KDS = () => {
 
   const [productDict, setProductDict] = useState<Record<string, string>>({});
   const [productNameDict, setProductNameDict] = useState<Record<string, string>>({});
+  const [productKdsDict, setProductKdsDict] = useState<Record<string, string>>({});
+
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const [dbHiddenCategories, setDbHiddenCategories] = useState<string[]>([]);
 
@@ -414,52 +685,119 @@ const KDS = () => {
   );
   
   const [hiddenOptionNames, setHiddenOptionNames] = useState<string[]>([]);
+  const [optionGroupSortDict, setOptionGroupSortDict] = useState<Record<string, number>>({});
+  const [optionNameKdsDict, setOptionNameKdsDict] = useState<Record<string, string>>({});
+
   const [doneItems, setDoneItems] = useState<Record<string, boolean>>({});
   const [optionGroupMapping, setOptionGroupMapping] = useState<Record<string, string>>({});
 
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Enregistrement du code d'appairage dans screen_pairings
+  useEffect(() => {
+    if (activeRestoId && adminUnlockCount < 5) return;
+
+    const registerScreenPairing = async () => {
+      try {
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+        await supabase.from('screen_pairings').upsert(
+          {
+            pairing_code: pairingCode,
+            device_name: 'KDS Cuisine',
+            device_type: 'kds',
+            status: 'PENDING',
+            expires_at: expiresAt
+          },
+          { onConflict: 'pairing_code' }
+        );
+      } catch (err) {
+        console.warn("screen_pairings upsert bypass:", err);
+      }
+    };
+
+    registerScreenPairing();
+  }, [pairingCode, activeRestoId, adminUnlockCount]);
+
+  // Carillon Web Audio harmonique (D5 -> A5)
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const chimeLoopTimerRef = useRef<any>(null);
+  const isLoopingSoundRef = useRef<boolean>(false);
+
+  const playScreenCallChime = useCallback(() => {
+    try {
+      const AudioCtxClass =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+
+      if (!audioCtxRef.current && AudioCtxClass) {
+        audioCtxRef.current = new AudioCtxClass();
+      }
+
+      const ctx = audioCtxRef.current;
+      if (!ctx) return;
+
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+
+      const nowTime = ctx.currentTime;
+
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'triangle';
+      osc1.frequency.setValueAtTime(587.33, nowTime);
+      gain1.gain.setValueAtTime(0.001, nowTime);
+      gain1.gain.exponentialRampToValueAtTime(0.7, nowTime + 0.03);
+      gain1.gain.exponentialRampToValueAtTime(0.0001, nowTime + 0.35);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(nowTime);
+      osc1.stop(nowTime + 0.35);
+
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(880.0, nowTime + 0.14);
+      gain2.gain.setValueAtTime(0.001, nowTime + 0.14);
+      gain2.gain.exponentialRampToValueAtTime(0.8, nowTime + 0.17);
+      gain2.gain.exponentialRampToValueAtTime(0.0001, nowTime + 0.55);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(nowTime + 0.14);
+      osc2.stop(nowTime + 0.55);
+    } catch (e) {
+      console.warn("Erreur lecture carillon KDS:", e);
+    }
+  }, []);
+
+  const startLoopingSound = useCallback(() => {
+    if (!audioEnabled || isLoopingSoundRef.current) return;
+    isLoopingSoundRef.current = true;
+    playScreenCallChime();
+
+    if (chimeLoopTimerRef.current) clearInterval(chimeLoopTimerRef.current);
+    chimeLoopTimerRef.current = setInterval(() => {
+      playScreenCallChime();
+    }, 2500);
+  }, [audioEnabled, playScreenCallChime]);
+
+  const stopLoopingSound = useCallback(() => {
+    isLoopingSoundRef.current = false;
+    if (chimeLoopTimerRef.current) {
+      clearInterval(chimeLoopTimerRef.current);
+      chimeLoopTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
+    let isMounted = true;
     const loadMapping = async () => {
-      if (orders.length === 0) return;
+      if (orders.length === 0 || !activeRestoId) return;
       const allItems = orders.flatMap(o => parseOrderDetails(o.order_details));
       const mapping = await fetchOptionGroupMapping(allItems, activeRestoId);
-      setOptionGroupMapping(mapping);
+      if (isMounted) setOptionGroupMapping(mapping);
     };
     loadMapping();
+    return () => { isMounted = false; };
   }, [orders, activeRestoId]);
-
-  const startLoopingSound = () => {
-    if (!audioEnabled) return;
-    try {
-      if (!audioRef.current) {
-        audioRef.current = new Audio('/son.mp3');
-        audioRef.current.volume = 1.0;
-        audioRef.current.loop = true;
-      }
-      if (audioRef.current.paused) {
-        audioRef.current.play().catch(e => console.error("Erreur lecture audio", e));
-      }
-    } catch (error) {
-      console.error("Impossible de lancer le son en boucle", error);
-    }
-  };
-
-  const stopLoopingSound = () => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-    }
-  };
-
-  useEffect(() => {
-    const hasNewOrders = orders.some(o => o.status?.toLowerCase() === 'nouvelle');
-    if (hasNewOrders && audioEnabled) {
-      startLoopingSound();
-    } else {
-      stopLoopingSound();
-    }
-  }, [orders, audioEnabled]);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -476,15 +814,16 @@ const KDS = () => {
     };
   }, [activeRestoId]);
 
+  // Nettoyage doneItems avec séparateur ::: compatible UUID
   useEffect(() => {
     setDoneItems(prev => {
-      const activeIds = orders.filter(o => isActiveForKDS(o.status)).map(o => o.id.toString());
+      const activeIds = new Set(orders.filter(o => isActiveForKDS(o.status)).map(o => String(o.id)));
       let hasChanges = false;
       const next = { ...prev };
       
       Object.keys(next).forEach(key => {
-        const orderId = key.split('-')[0];
-        if (!activeIds.includes(orderId)) {
+        const orderId = key.split(':::')[0];
+        if (!activeIds.has(orderId)) {
           delete next[key]; 
           hasChanges = true;
         }
@@ -500,7 +839,56 @@ const KDS = () => {
     return () => clearInterval(interval);
   }, [activeRestoId]);
 
+  // Écoute de l'appairage en temps réel
+  useEffect(() => {
+    if (activeRestoId && adminUnlockCount < 5) return;
+
+    const pairChannel = supabase
+      .channel(`kds_pair_${pairingCode}`)
+      .on('broadcast', { event: 'pair_success' }, (payload) => {
+        if (payload?.payload) {
+          const rId = payload.payload.restaurant_id || payload.payload.restaurantId;
+          if (rId) handlePairSuccess(rId);
+        }
+      })
+      .subscribe();
+
+    const tableChannel = supabase
+      .channel(`kds_watch_screen_pairings_${pairingCode}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'screen_pairings',
+          filter: `pairing_code=eq.${pairingCode}`
+        },
+        (payload) => {
+          const row = payload.new || payload.old;
+          if (row && row.status === 'PAIRED') {
+            const rId = row.restaurant_id || row.restaurantId;
+            if (rId) handlePairSuccess(rId);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(pairChannel);
+      supabase.removeChannel(tableChannel);
+    };
+  }, [activeRestoId, adminUnlockCount, pairingCode, handlePairSuccess]);
+
+  // Déblocage audio garanti avec activation AudioContext immédiate
   const unlockAudio = () => {
+    try {
+      const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtxClass) {
+        if (!audioCtxRef.current) audioCtxRef.current = new AudioCtxClass();
+        if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
+      }
+      playScreenCallChime();
+    } catch {}
     setAudioEnabled(true);
     setShowAudioUnlock(false);
     toast.success("Son activé !");
@@ -512,6 +900,11 @@ const KDS = () => {
       stopLoopingSound();
       toast.info("Son coupé");
     } else {
+      try {
+        if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+          audioCtxRef.current.resume();
+        }
+      } catch {}
       setAudioEnabled(true);
       setShowAudioUnlock(false);
       toast.success("Son activé !");
@@ -537,6 +930,13 @@ const KDS = () => {
     setOptionFontSize(size);
     localStorage.setItem('kds_option_font_size', size);
     toast.success(`Police option : ${OPTION_FONT_CONFIGS[size]?.label || size}`);
+  };
+
+  const handleChangeLayoutMode = (mode: '5x1' | '5x2') => {
+    setLandscapeLayoutMode(mode);
+    localStorage.setItem('kds_layout_mode', mode);
+    setCurrentPage(1);
+    toast.success(mode === '5x1' ? "Mode 5 Colonnes (1 Ligne) activé" : "Mode 10 Cases (2 Lignes) activé");
   };
 
   const fetchTheme = async () => {
@@ -580,65 +980,72 @@ const KDS = () => {
       }
       setDbHiddenCategories(hiddenCats);
 
-      const { data } = await supabase.from('product').select('id, name, category').eq('restaurant_id', activeRestoId);
+      const { data } = await supabase
+        .from('product')
+        .select('id, name, name_kds, category')
+        .eq('restaurant_id', activeRestoId);
+
       if (data) {
         const dict: Record<string, string> = {};
         const nameDict: Record<string, string> = {};
+        const kdsDict: Record<string, string> = {};
         const cats = new Set<string>();
+
         data.forEach(p => {
-          if (p.id) dict[p.id.toString()] = p.category;
-          if (p.name) nameDict[p.name.toLowerCase().trim()] = p.category;
+          const strId = p.id?.toString();
+          const rawName = p.name ? p.name.trim() : '';
+          const normName = rawName.toLowerCase();
+          const normalizedClean = normalizeText(rawName);
+
+          if (strId) dict[strId] = p.category;
+          if (normName) nameDict[normName] = p.category;
           if (p.category) cats.add(p.category);
+
+          if (p.name_kds && String(p.name_kds).trim()) {
+            const cleanKds = String(p.name_kds).trim();
+            if (strId) kdsDict[strId] = cleanKds;
+            if (normName) kdsDict[normName] = cleanKds;
+            if (normalizedClean) kdsDict[normalizedClean] = cleanKds;
+          }
         });
+
         setProductDict(dict);
         setProductNameDict(nameDict);
+        setProductKdsDict(kdsDict);
         setAvailableCategories(Array.from(cats).sort());
       }
     } catch (e) { console.error("Erreur chargement catalogue", e); }
   };
 
-  const fetchHiddenOptions = async () => {
+  const fetchKdsOptionsMetadata = async () => {
     if (!activeRestoId) return;
     try {
       const { data: groups } = await supabase
         .from('option_groups')
-        .select('id, name, product_overrides, target_category_name, target_subcategory_id')
-        .eq('restaurant_id', activeRestoId)
-        .eq('show_on_kds', false);
+        .select('id, name, sort_kds, show_on_kds, product_overrides, target_category_name, target_subcategory_id')
+        .eq('restaurant_id', activeRestoId);
 
-      if (!groups || groups.length === 0) {
-        setHiddenOptionNames([]);
-        return;
-      }
+      if (!groups) return;
 
       const namesToHide = new Set<string>();
       const groupIds: number[] = [];
-      const productIdsToFetch = new Set<string>();
-      const categoriesToFetch = new Set<string>();
+      const sortDict: Record<string, number> = {};
 
       groups.forEach(g => {
         if (g.id) groupIds.push(g.id);
-        if (g.name) namesToHide.add(g.name.toLowerCase().trim());
 
-        if (g.product_overrides) {
-          try {
-            const overrides = typeof g.product_overrides === 'string'
-              ? JSON.parse(g.product_overrides)
-              : g.product_overrides;
-            if (overrides && typeof overrides === 'object') {
-              Object.keys(overrides).forEach(pId => {
-                if (pId) productIdsToFetch.add(String(pId));
-              });
-            }
-          } catch (e) {
-            console.error("Erreur parse product_overrides:", e);
+        if (g.name) {
+          const normName = normalizeText(g.name);
+          sortDict[normName] = typeof g.sort_kds === 'number' ? g.sort_kds : 0;
+          if (g.show_on_kds === false) {
+            namesToHide.add(g.name.toLowerCase().trim());
           }
         }
-
-        if (g.target_category_name) {
-          categoriesToFetch.add(g.target_category_name.toLowerCase().trim());
-        }
       });
+
+      setOptionGroupSortDict(sortDict);
+
+      const kdsNameDict: Record<string, string> = {};
 
       if (groupIds.length > 0) {
         const { data: links } = await supabase
@@ -646,55 +1053,43 @@ const KDS = () => {
           .select('option_id')
           .in('group_id', groupIds);
 
-        if (links && links.length > 0) {
-          const optionIds = links.map(l => l.option_id).filter(Boolean);
-          if (optionIds.length > 0) {
-            const { data: options } = await supabase
-              .from('options')
-              .select('name')
-              .in('id', optionIds);
+        const optionIds = links ? links.map(l => l.option_id).filter(Boolean) : [];
 
-            if (options) {
-              options.forEach(o => {
-                if (o.name) namesToHide.add(o.name.toLowerCase().trim());
-              });
-            }
+        if (optionIds.length > 0) {
+          const { data: options } = await supabase
+            .from('options')
+            .select('id, name, name_kds')
+            .in('id', optionIds);
+
+          if (options) {
+            options.forEach(o => {
+              if (o.name && o.name_kds && String(o.name_kds).trim()) {
+                kdsNameDict[normalizeText(o.name)] = String(o.name_kds).trim();
+              }
+            });
           }
         }
       }
 
-      if (productIdsToFetch.size > 0) {
-        const pIds = Array.from(productIdsToFetch);
-        const { data: products } = await supabase
-          .from('product')
-          .select('name')
-          .in('id', pIds);
-
-        if (products) {
-          products.forEach(p => {
-            if (p.name) namesToHide.add(p.name.toLowerCase().trim());
-          });
-        }
-      }
-
-      if (categoriesToFetch.size > 0) {
-        const { data: catProducts } = await supabase
-          .from('product')
-          .select('name, category')
+      try {
+        const { data: directOpts } = await supabase
+          .from('options')
+          .select('name, name_kds')
           .eq('restaurant_id', activeRestoId);
 
-        if (catProducts) {
-          catProducts.forEach(p => {
-            if (p.name && p.category && categoriesToFetch.has(p.category.toLowerCase().trim())) {
-              namesToHide.add(p.name.toLowerCase().trim());
+        if (directOpts) {
+          directOpts.forEach(o => {
+            if (o.name && o.name_kds && String(o.name_kds).trim()) {
+              kdsNameDict[normalizeText(o.name)] = String(o.name_kds).trim();
             }
           });
         }
-      }
+      } catch {}
 
+      setOptionNameKdsDict(kdsNameDict);
       setHiddenOptionNames(Array.from(namesToHide));
     } catch (e) { 
-      console.error("Erreur lors de la récupération des options masquées", e); 
+      console.error("Erreur lors de la récupération des métadonnées KDS", e); 
     }
   };
 
@@ -716,7 +1111,7 @@ const KDS = () => {
         
       if (error) throw error;
       if (data) setOrders(data);
-    } catch (e) {
+    } catch {
       toast.error("Erreur de connexion avec la base de données");
     } finally {
       setIsLoading(false);
@@ -726,7 +1121,7 @@ const KDS = () => {
   useEffect(() => {
     fetchOrders();
     fetchCatalog();
-    fetchHiddenOptions();
+    fetchKdsOptionsMetadata();
     fetchTheme();
     if (!activeRestoId) return;
 
@@ -734,7 +1129,7 @@ const KDS = () => {
       .channel(`kds_orders_${activeRestoId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `restaurant_id=eq.${activeRestoId}` }, (payload) => {
         if (payload.eventType === 'DELETE') {
-           setOrders(prev => prev.filter(o => o.id !== payload.old.id));
+           setOrders(prev => prev.filter(o => String(o.id) !== String(payload.old.id)));
            return;
         }
         fetchOrders();
@@ -744,7 +1139,21 @@ const KDS = () => {
     const optionGroupsChannel = supabase
       .channel(`kds_optgroups_${activeRestoId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'option_groups', filter: `restaurant_id=eq.${activeRestoId}` }, () => {
-        fetchHiddenOptions();
+        fetchKdsOptionsMetadata();
+      })
+      .subscribe();
+
+    const optionsChannel = supabase
+      .channel(`kds_options_${activeRestoId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'options' }, () => {
+        fetchKdsOptionsMetadata();
+      })
+      .subscribe();
+
+    const productsChannel = supabase
+      .channel(`kds_products_${activeRestoId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'product', filter: `restaurant_id=eq.${activeRestoId}` }, () => {
+        fetchCatalog();
       })
       .subscribe();
 
@@ -759,30 +1168,38 @@ const KDS = () => {
       stopLoopingSound();
       supabase.removeChannel(ordersChannel);
       supabase.removeChannel(optionGroupsChannel);
+      supabase.removeChannel(optionsChannel);
+      supabase.removeChannel(productsChannel);
       supabase.removeChannel(categoriesChannel);
     };
-  }, [activeRestoId]);
+  }, [activeRestoId, stopLoopingSound]);
 
   const acceptOrder = async (orderId: string | number) => {
     try {
-      await supabase.from('orders').update({ status: 'En cours' }).eq('id', orderId);
+      const { error } = await supabase.from('orders').update({ status: 'En cours' }).eq('id', orderId);
+      if (error) throw error;
+      setOrders(prev => prev.map(o => String(o.id) === String(orderId) ? { ...o, status: 'En cours' } : o));
       toast.success("Commande acceptée !");
-    } catch (e) { toast.error("Erreur"); }
+    } catch { toast.error("Erreur lors de l'acceptation"); }
   };
 
   const markOrderAsReady = async (orderId: string | number) => {
     try {
-      await supabase.from('orders').update({ status: 'Prêt' }).eq('id', orderId);
+      const { error } = await supabase.from('orders').update({ status: 'Prêt' }).eq('id', orderId);
+      if (error) throw error;
+      setOrders(prev => prev.map(o => String(o.id) === String(orderId) ? { ...o, status: 'Prêt' } : o));
       toast.success("Commande prête !");
-    } catch (e) { toast.error("Erreur"); }
+    } catch { toast.error("Erreur lors de la validation"); }
   };
 
   const revertOrder = async (orderId: string | number) => {
     try {
-      await supabase.from('orders').update({ status: 'En cours' }).eq('id', orderId);
+      const { error } = await supabase.from('orders').update({ status: 'En cours' }).eq('id', orderId);
+      if (error) throw error;
       toast.success("Commande replacée en cuisine !");
       setIsHistoryOpen(false); 
-    } catch (e) { toast.error("Erreur lors de la restauration"); }
+      fetchOrders();
+    } catch { toast.error("Erreur lors de la restauration"); }
   };
 
   const handleForceSendToKitchen = (orderId: string | number) => {
@@ -796,11 +1213,14 @@ const KDS = () => {
       toast.error("Veuillez entrer un ID valide");
       return;
     }
-    localStorage.setItem('pos_restaurant_id', tempRestoId.trim());
-    setActiveRestoId(tempRestoId.trim());
+    const cleanId = tempRestoId.trim();
+    localStorage.setItem('pos_restaurant_id', cleanId);
+    localStorage.setItem('admin_override_restaurant_id', cleanId);
+    setActiveRestoId(cleanId);
     fetchCatalog();
-    fetchHiddenOptions();
+    fetchKdsOptionsMetadata();
     fetchTheme();
+    fetchOrders();
     setAdminUnlockCount(0); 
     setIsSettingsOpen(false);
     toast.success("Configuration mise à jour !");
@@ -816,10 +1236,10 @@ const KDS = () => {
 
   const getOrderTypeBadge = (typeId: string) => {
     switch(typeId) {
-      case ORDER_TYPE_IDS.SUR_PLACE: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-blue-600 bg-white px-1.5 py-0.5 uppercase tracking-widest rounded-none shadow-sm">SP</span>;
-      case ORDER_TYPE_IDS.EMPORTER: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-orange-600 bg-white px-1.5 py-0.5 uppercase tracking-widest rounded-none shadow-sm">EMP</span>;
-      case ORDER_TYPE_IDS.LIVRAISON: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-purple-600 bg-white px-1.5 py-0.5 uppercase tracking-widest rounded-none shadow-sm">LIV</span>;
-      default: return <span className="text-[9px] xl:text-xs 2xl:text-sm font-black text-gray-600 bg-white px-1.5 py-0.5 uppercase tracking-widest rounded-none shadow-sm">?</span>;
+      case ORDER_TYPE_IDS.SUR_PLACE: return <span className="text-[clamp(10px,1.15vh,15px)] font-black text-blue-600 bg-white px-[0.6vw] py-[0.2vh] uppercase tracking-widest rounded-none shadow-sm">SP</span>;
+      case ORDER_TYPE_IDS.EMPORTER: return <span className="text-[clamp(10px,1.15vh,15px)] font-black text-orange-600 bg-white px-[0.6vw] py-[0.2vh] uppercase tracking-widest rounded-none shadow-sm">EMP</span>;
+      case ORDER_TYPE_IDS.LIVRAISON: return <span className="text-[clamp(10px,1.15vh,15px)] font-black text-purple-600 bg-white px-[0.6vw] py-[0.2vh] uppercase tracking-widest rounded-none shadow-sm">LIV</span>;
+      default: return <span className="text-[clamp(10px,1.15vh,15px)] font-black text-gray-600 bg-white px-[0.6vw] py-[0.2vh] uppercase tracking-widest rounded-none shadow-sm">?</span>;
     }
   };
 
@@ -827,6 +1247,7 @@ const KDS = () => {
     return orders.filter(o => isActiveForKDS(o.status) && isRealScheduledOrder(o, now) && !forcedOrderIds.has(String(o.id))).length;
   }, [orders, now, forcedOrderIds]);
 
+  // Commandes visibles sur ce poste
   const allDisplayOrders = useMemo(() => {
     const active = orders.filter(o => {
       if (!isActiveForKDS(o.status)) return false;
@@ -847,7 +1268,6 @@ const KDS = () => {
         
         const productId = (item.product?.id || item.id || item.product_id || '').toString().trim();
         const baseProductId = productId.includes('-') ? productId.split('-')[0] : productId;
-        
         const itemInternalName = (item.product?.name || item.name || '').toLowerCase().trim();
         
         let rawCategory = productDict[baseProductId] || productDict[productId] || productNameDict[itemInternalName] || item.product?.category || item.product?.category_id || item.category || item.category_id || '';
@@ -873,10 +1293,33 @@ const KDS = () => {
 
       const groupedItems: any[] = [];
       filteredItems.forEach((item: any) => {
-        const productName = item.product?.name || item.name || 'Produit inconnu';
+        const rawProductName = item.product?.name || item.name || 'Produit inconnu';
+        const productId = (item.product?.id || item.id || item.product_id || '').toString().trim();
+        const baseProductId = productId.includes('-') ? productId.split('-')[0] : productId;
+        const normRawName = rawProductName.toLowerCase().trim();
+        const normalizedClean = normalizeText(rawProductName);
+
+        const productName = 
+          item.product?.name_kds ||
+          item.name_kds ||
+          productKdsDict[baseProductId] ||
+          productKdsDict[productId] ||
+          productKdsDict[normRawName] ||
+          productKdsDict[normalizedClean] ||
+          rawProductName;
+
         const qty = item.quantity || 1;
         
-        const optionRows = extractOptionLinesForKDS(item, hiddenOptionNames, optionGroupMapping, groupOptionsInline);
+        const optionRows = extractOptionLinesForKDS(
+          item, 
+          hiddenOptionNames, 
+          optionGroupMapping, 
+          groupOptionsInline,
+          optionGroupSortDict,
+          optionNameKdsDict,
+          productKdsDict
+        );
+
         const sig = `${productName}|${optionRows.map(r => r.items.map(o => `${o.isSans ? 'sans:' : ''}${o.name}`).join(',')).join('|')}`;
         
         const existing = groupedItems.find(g => g.sig === sig);
@@ -889,10 +1332,10 @@ const KDS = () => {
 
       const flatLines: any[] = [];
       groupedItems.forEach((gItem: any) => {
-        const itemKey = `${order.id}-${gItem.sig}`;
+        const itemKey = `${order.id}:::${gItem.sig}`;
         
         flatLines.push({
-          id: `${itemKey}-prod`,
+          id: `${itemKey}:::prod`,
           isProduct: true,
           qty: gItem.qty,
           name: gItem.productName,
@@ -903,7 +1346,7 @@ const KDS = () => {
         
         gItem.optionRows.forEach((row: any, rIdx: number) => {
           flatLines.push({
-            id: `${itemKey}-row-${rIdx}`,
+            id: `${itemKey}:::row-${rIdx}`,
             isProduct: false,
             items: row.items,
             isSans: row.isSans,
@@ -919,16 +1362,45 @@ const KDS = () => {
 
       let rowSpan = 1;
       let colSpan = 1;
-      let linesPerColumn = LINES_PER_SINGLE_ROW;
+      let linesPerColumn = 7;
 
-      if (totalLines > LINES_PER_SINGLE_ROW && totalLines <= LINES_PER_DOUBLE_ROW) {
-        rowSpan = 2;
-        colSpan = 1;
-        linesPerColumn = LINES_PER_DOUBLE_ROW;
-      } else if (totalLines > LINES_PER_DOUBLE_ROW) {
-        rowSpan = 2;
-        colSpan = Math.min(5, Math.ceil(totalLines / LINES_PER_DOUBLE_ROW));
-        linesPerColumn = LINES_PER_DOUBLE_ROW;
+      if (activeLayoutMode === '5x1') {
+        rowSpan = 1;
+        if (totalLines > 14) {
+          colSpan = Math.min(5, Math.ceil(totalLines / 14));
+          linesPerColumn = Math.ceil(totalLines / colSpan);
+        } else {
+          colSpan = 1;
+          linesPerColumn = 14;
+        }
+      } else if (activeLayoutMode === '5x2') {
+        if (totalLines <= 7) {
+          rowSpan = 1;
+          colSpan = 1;
+          linesPerColumn = 7;
+        } else if (totalLines <= 15) {
+          rowSpan = 2;
+          colSpan = 1;
+          linesPerColumn = 15;
+        } else {
+          rowSpan = 2;
+          colSpan = Math.min(5, Math.ceil(totalLines / 15));
+          linesPerColumn = 15;
+        }
+      } else if (activeLayoutMode === 'portrait') {
+        if (totalLines <= 8) {
+          rowSpan = 1;
+          colSpan = 1;
+          linesPerColumn = 8;
+        } else if (totalLines <= 16) {
+          rowSpan = 2;
+          colSpan = 1;
+          linesPerColumn = 16;
+        } else {
+          rowSpan = 2;
+          colSpan = 2;
+          linesPerColumn = 14;
+        }
       }
 
       const chunks = chunkArrayByLines(flatLines, linesPerColumn);
@@ -938,17 +1410,54 @@ const KDS = () => {
         groupedItems, 
         flatLines, 
         chunks, 
-        rowSpan, 
+        rowSpan,
         colSpan, 
         linesPerColumn 
       };
     }).filter(order => order.groupedItems.length > 0);
-  }, [orders, selectedCategories, productDict, productNameDict, hiddenOptionNames, dbHiddenCategories, availableCategories, optionGroupMapping, groupOptionsInline, forcedOrderIds, now]);
+  }, [
+    orders, 
+    selectedCategories, 
+    productDict, 
+    productNameDict, 
+    productKdsDict,
+    hiddenOptionNames, 
+    dbHiddenCategories, 
+    availableCategories, 
+    optionGroupMapping, 
+    groupOptionsInline, 
+    forcedOrderIds, 
+    now, 
+    activeLayoutMode,
+    optionGroupSortDict,
+    optionNameKdsDict
+  ]);
 
-  // 🟢 UTILISATION DU NOUVEL ALGORITHME ZÉRO-TROU
-  const paginatedPages = useMemo(() => {
-    return paginateNoHoles(allDisplayOrders);
+  const newOrdersAlertList = useMemo(() => {
+    return allDisplayOrders.filter(o => o.status?.trim().toLowerCase() === 'nouvelle');
   }, [allDisplayOrders]);
+
+  // Dépendance booléenne pour éliminer le bug du carillon répété chaque seconde
+  const hasNewOrders = newOrdersAlertList.length > 0;
+
+  useEffect(() => {
+    if (hasNewOrders && audioEnabled) {
+      startLoopingSound();
+    } else {
+      stopLoopingSound();
+    }
+    return () => stopLoopingSound();
+  }, [hasNewOrders, audioEnabled, startLoopingSound, stopLoopingSound]);
+
+  const paginatedPages = useMemo(() => {
+    if (activeLayoutMode === '5x1') {
+      return paginate5x1(allDisplayOrders);
+    } else if (activeLayoutMode === '5x2') {
+      return paginate5x2(allDisplayOrders);
+    } else {
+      return paginatePortrait(allDisplayOrders);
+    }
+  }, [allDisplayOrders, activeLayoutMode]);
 
   const totalPages = paginatedPages.length;
   const currentOrders = paginatedPages[currentPage - 1] || [];
@@ -959,17 +1468,65 @@ const KDS = () => {
     }
   }, [totalPages, currentPage]);
 
+  const goToPrevPage = useCallback(() => {
+    setCurrentPage(p => Math.max(1, p - 1));
+  }, []);
+
+  const goToNextPage = useCallback(() => {
+    setCurrentPage(p => Math.min(totalPages, p + 1));
+  }, [totalPages]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') {
-        setCurrentPage(p => Math.max(1, p - 1));
-      } else if (e.key === 'ArrowRight') {
-        setCurrentPage(p => Math.min(totalPages, p + 1));
+      const target = e.target as HTMLElement | null;
+      const isInput = target && (
+        target.tagName === 'INPUT' || 
+        target.tagName === 'TEXTAREA' || 
+        target.isContentEditable
+      );
+
+      if (!isInput && (e.key === 'd' || e.key === 'D')) {
+        if (activeRestoId) {
+          setIsUnlinkModalOpen(true);
+          setUnlinkPin('');
+          setUnlinkError('');
+        }
+        return;
+      }
+
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        goToPrevPage();
+      } else if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+        goToNextPage();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [totalPages]);
+  }, [goToPrevPage, goToNextPage, activeRestoId]);
+
+  const prevPageHasNew = useMemo(() => {
+    if (currentPage <= 1) return false;
+    const prevOrders = paginatedPages[currentPage - 2] || [];
+    return prevOrders.some(o => o.status?.trim().toLowerCase() === 'nouvelle');
+  }, [currentPage, paginatedPages]);
+
+  const nextPageHasNew = useMemo(() => {
+    if (currentPage >= totalPages) return false;
+    const nextOrders = paginatedPages[currentPage] || [];
+    return nextOrders.some(o => o.status?.trim().toLowerCase() === 'nouvelle');
+  }, [currentPage, totalPages, paginatedPages]);
+
+  const prevPageHasLate = useMemo(() => {
+    if (currentPage <= 1) return false;
+    const prevOrders = paginatedPages[currentPage - 2] || [];
+    return prevOrders.some(o => ((now.getTime() - new Date(o.created_at).getTime()) / 60000) > targetPrepMinutes);
+  }, [currentPage, paginatedPages, now, targetPrepMinutes]);
+
+  const nextPageHasLate = useMemo(() => {
+    if (currentPage >= totalPages) return false;
+    const nextOrders = paginatedPages[currentPage] || [];
+    return nextOrders.some(o => ((now.getTime() - new Date(o.created_at).getTime()) / 60000) > targetPrepMinutes);
+  }, [currentPage, totalPages, paginatedPages, now, targetPrepMinutes]);
 
   const historyOrders = orders
     .filter(o => !isActiveForKDS(o.status))
@@ -994,6 +1551,11 @@ const KDS = () => {
   const currentProductFont = PRODUCT_FONT_CONFIGS[productFontSize] || PRODUCT_FONT_CONFIGS.normal;
   const currentOptionFont = OPTION_FONT_CONFIGS[optionFontSize] || OPTION_FONT_CONFIGS.normal;
 
+  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
+  const mobilePairUrl = `${currentOrigin}${currentPath}#/pair?code=${pairingCode}&type=kds`;
+  const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(mobilePairUrl)}&margin=10`;
+
   return (
     <div 
       className="h-[100dvh] w-full bg-secondary text-white font-helvetica flex flex-col overflow-hidden relative select-none rounded-none" 
@@ -1016,122 +1578,208 @@ const KDS = () => {
         `}
       </style>
 
-      {showAudioUnlock && !missingIdError && (
+      {showAudioUnlock && !!activeRestoId && (
         <button 
           onClick={unlockAudio} 
-          className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-none font-black animate-bounce shadow-2xl z-50 flex items-center gap-3 border-2 border-white cursor-pointer"
+          className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-[2vw] py-[1.2vh] rounded-none font-black animate-bounce shadow-2xl z-50 flex items-center gap-3 border-2 border-white cursor-pointer text-[clamp(13px,1.5vh,20px)]"
         >
-          <VolumeX size={24} /> CLIQUEZ ICI POUR ACTIVER LE SON
+          <VolumeX className="w-[2.2vh] h-[2.2vh]" /> CLIQUEZ ICI POUR ACTIVER LE SON
         </button>
       )}
 
       {isOffline && (
-        <div className="absolute top-0 left-0 right-0 bg-red-600 text-white text-center py-1 2xl:py-2 font-black uppercase tracking-widest text-[10px] 2xl:text-base flex justify-center items-center gap-1.5 z-50 animate-pulse">
-          <WifiOff className="w-3 h-3 2xl:w-5 2xl:h-5" /> Hors ligne ! KDS non synchronisé.
+        <div className="absolute top-0 left-0 right-0 bg-red-600 text-white text-center py-[0.5vh] font-black uppercase tracking-widest text-[clamp(10px,1.2vh,16px)] flex justify-center items-center gap-1.5 z-50 animate-pulse">
+          <WifiOff className="w-[1.8vh] h-[1.8vh]" /> Hors ligne ! KDS non synchronisé.
         </div>
       )}
 
-      {/* BANDEAU SUPÉRIEUR AVEC PAGINATION */}
-      <div className={`flex justify-between items-center px-3 py-1.5 2xl:px-5 2xl:py-2.5 bg-secondary border-b border-black/40 z-10 flex-shrink-0 ${isOffline ? 'mt-6 2xl:mt-10' : ''}`}>
-        <div className="flex items-center gap-2 2xl:gap-4">
-          <span className="text-[12px] xl:text-sm 2xl:text-xl font-black uppercase tracking-widest text-white/50">
-            {selectedCategories.length > 0 || dbHiddenCategories.length > 0 ? "KDS (FILTRÉ)" : "KDS"}
-          </span>
-          {!missingIdError && (
-            <span className="text-[11px] xl:text-xs 2xl:text-lg font-bold bg-white/10 px-2 py-0.5 2xl:px-3 2xl:py-1 rounded-none text-white/80">
-              {allDisplayOrders.length} en cours
-            </span>
+      {/* NOTIFICATION FLOTTANTE NOUVELLES COMMANDES */}
+      {newOrdersAlertList.length > 0 && (
+        <div className={`absolute ${isOffline ? 'top-10' : 'top-4'} right-4 z-40 flex flex-col gap-2 max-w-sm pointer-events-auto`}>
+          {newOrdersAlertList.map((newOrd) => (
+            <div 
+              key={newOrd.id}
+              className="bg-red-600/95 backdrop-blur-md border border-red-400/50 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center justify-between gap-4 animate-alert"
+            >
+              <div className="flex items-center gap-2.5">
+                <BellRing size={20} className="text-white animate-bounce shrink-0" />
+                <div>
+                  <span className="text-[clamp(10px,1.1vh,13px)] uppercase font-black tracking-wider text-red-200 block leading-tight">
+                    Nouvelle commande
+                  </span>
+                  <span className="font-black text-[clamp(16px,2vh,24px)] tracking-tight leading-none">
+                    {newOrd.order_number || `#${String(newOrd.id).slice(-3)}`}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => acceptOrder(newOrd.id)}
+                className="bg-white text-red-600 hover:bg-red-50 active:scale-95 px-3.5 py-1.5 rounded-lg font-black text-[clamp(11px,1.3vh,16px)] uppercase tracking-wider transition-all shadow-md cursor-pointer shrink-0"
+              >
+                Accepter
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* BOUTONS FLOTTANTS LATÉRAUX COMPACTS */}
+      {totalPages > 1 && (
+        <>
+          {currentPage > 1 && (
+            <button 
+              type="button"
+              onClick={goToPrevPage}
+              className={`absolute left-2 top-1/2 -translate-y-1/2 z-30 w-9 h-9 2xl:w-12 2xl:h-12 rounded-full flex items-center justify-center backdrop-blur-md border text-white shadow-xl transition-all active:scale-90 cursor-pointer ${
+                prevPageHasNew 
+                  ? 'bg-red-600 text-white border-red-400 animate-pulse ring-2 ring-red-400' 
+                  : 'bg-red-600/40 hover:bg-red-600/70 border-red-400/40'
+              }`}
+              title="Page précédente"
+            >
+              <ChevronLeft className="w-5 h-5 2xl:w-7 2xl:h-7" />
+            </button>
           )}
 
-          {/* SÉLECTEUR DE PAGINATION SANS SCROLL */}
-          <div className="flex items-center bg-slate-900 border border-slate-700 rounded-none overflow-hidden shadow-inner ml-1">
-            <button
-              disabled={currentPage <= 1}
-              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-              className="px-2 py-1 2xl:px-3 2xl:py-1.5 hover:bg-white/10 active:bg-white/20 disabled:opacity-30 disabled:hover:bg-transparent text-white transition-colors flex items-center justify-center cursor-pointer disabled:cursor-not-allowed"
-              title="Page précédente (Flèche gauche)"
+          {currentPage < totalPages && (
+            <button 
+              type="button"
+              onClick={goToNextPage}
+              className={`absolute right-2 top-1/2 -translate-y-1/2 z-30 w-9 h-9 2xl:w-12 2xl:h-12 rounded-full flex items-center justify-center backdrop-blur-md border text-white shadow-xl transition-all active:scale-90 cursor-pointer ${
+                nextPageHasNew 
+                  ? 'bg-red-600 text-white border-red-400 animate-pulse ring-2 ring-red-400' 
+                  : 'bg-red-600/40 hover:bg-red-600/70 border-red-400/40'
+              }`}
+              title="Page suivante"
             >
-              <ChevronLeft className="w-4 h-4 2xl:w-6 2xl:h-6" />
+              <ChevronRight className="w-5 h-5 2xl:w-7 2xl:h-7" />
             </button>
-            <span className="px-2.5 py-0.5 font-black text-xs 2xl:text-base text-amber-400 tracking-wider">
-              {currentPage} / {totalPages}
-            </span>
-            <button
-              disabled={currentPage >= totalPages}
-              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-              className="px-2 py-1 2xl:px-3 2xl:py-1.5 hover:bg-white/10 active:bg-white/20 disabled:opacity-30 disabled:hover:bg-transparent text-white transition-colors flex items-center justify-center cursor-pointer disabled:cursor-not-allowed"
-              title="Page suivante (Flèche droite)"
-            >
-              <ChevronRight className="w-4 h-4 2xl:w-6 2xl:h-6" />
-            </button>
-          </div>
+          )}
+        </>
+      )}
 
-          <button 
-            onClick={() => setIsScheduledModalOpen(true)}
-            className={`px-2.5 py-1 2xl:px-4 2xl:py-1.5 rounded-none font-black text-xs 2xl:text-base uppercase flex items-center gap-2 transition-all cursor-pointer ${
-              futureScheduledCount > 0 
-                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md' 
-                : 'bg-white/5 hover:bg-white/10 text-white/70'
-            }`}
-            title="Voir les commandes programmées à l'avance"
-          >
-            <CalendarClock className="w-4 h-4 2xl:w-5 2xl:h-5" />
-            <span>Programmées</span>
-            {futureScheduledCount > 0 && (
-              <span className="bg-slate-950 text-amber-400 text-[10px] 2xl:text-xs px-1.5 py-0.2 rounded-none">
-                {futureScheduledCount}
-              </span>
-            )}
-          </button>
+      {/* =========================================================
+          CORPS PRINCIPAL : ÉCRAN D'APPAIRAGE OU GRILLE KDS
+          ========================================================= */}
+      {!activeRestoId ? (
+        <div className="h-screen w-screen max-h-screen max-w-screen overflow-hidden bg-black text-neutral-100 flex flex-col justify-between select-none font-sans tracking-tight">
           
-          <button onClick={() => setIsHistoryOpen(true)} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded-none transition-colors relative ml-1" title="Historique">
-            <History className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" />
-            {historyOrders.length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-emerald-500 text-slate-900 text-[9px] 2xl:text-sm font-black px-1 2xl:px-2 rounded-none">
-                {historyOrders.length}
+          <header className="h-[9vh] min-h-[56px] px-8 lg:px-14 flex items-center justify-between border-b border-white/[0.06] shrink-0">
+            <span className="text-xs lg:text-sm font-semibold tracking-[0.2em] uppercase text-neutral-400">
+              Affichage Cuisine (KDS)
+            </span>
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-[11px] font-medium tracking-wider uppercase text-neutral-400">
+                Prêt pour jumelage
               </span>
-            )}
-          </button>
+            </div>
+          </header>
 
-          <button onClick={toggleAudioStatus} className={`p-1.5 2xl:p-3 rounded-none ml-1 cursor-pointer transition-colors ${audioEnabled ? 'bg-emerald-500/10' : 'bg-red-500/10 animate-pulse'}`} title="Son">
-            {audioEnabled ? <Volume2 className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" /> : <VolumeX className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" />}
-          </button>
-        </div>
+          <main className="flex-1 flex items-center justify-center p-6 lg:p-12 min-h-0">
+            <div className={`w-full ${isPortrait ? 'max-w-xs' : 'max-w-3xl'}`}>
+              {isPortrait ? (
+                <div className="flex flex-col items-center text-center space-y-6">
+                  <div className="p-3.5 bg-white rounded-2xl shadow-2xl">
+                    <img src={qrImageUrl} alt="QR Code KDS" className="w-52 h-52 object-contain block" />
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[10px] tracking-[0.25em] uppercase text-neutral-500 font-medium">
+                      Code de validation
+                    </span>
+                    <div className="font-mono text-3xl font-light tracking-[0.3em] text-white">
+                      {pairingCode.slice(0, 3)} {pairingCode.slice(3)}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-neutral-500 pt-2">
+                    <button
+                      onClick={() => setPairingCode(generateRandomPairingCode())}
+                      className="text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                    >
+                      Renouveler
+                    </button>
+                    <span>•</span>
+                    <button
+                      onClick={() => setIsSettingsOpen(true)}
+                      className="text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                    >
+                      Configuration manuelle
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-12 lg:gap-16 items-center">
+                  <div className="flex justify-end">
+                    <div className="p-4 bg-white rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.8)]">
+                      <img src={qrImageUrl} alt="QR Code KDS" className="w-48 h-48 lg:w-56 lg:h-56 object-contain block" />
+                    </div>
+                  </div>
+                  <div className="space-y-6">
+                    <div className="space-y-2">
+                      <h2 className="text-2xl lg:text-3xl font-light tracking-tight text-white">
+                        Connexion du KDS
+                      </h2>
+                      <p className="text-xs lg:text-sm text-neutral-400 font-normal leading-relaxed max-w-sm">
+                        Scannez ce QR code avec votre appareil photo ou saisissez le code ci-dessous sur votre interface de gestion.
+                      </p>
+                    </div>
 
-        <div className="flex items-center gap-2 2xl:gap-4">
-          <div className="w-px h-5 2xl:h-8 bg-white/20 mx-1 2xl:mx-3"></div>
-          <button onClick={() => { fetchOrders(); fetchHiddenOptions(); }} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded-none transition-colors">
-            <RefreshCcw className={`w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 ${isLoading ? "animate-spin text-primary/70" : "text-primary"}`} />
-          </button>
-          <button onClick={() => setIsSettingsOpen(true)} className="bg-white/5 hover:bg-white/10 p-1.5 2xl:p-3 rounded-none transition-colors">
-            <Settings className="w-4 h-4 xl:w-5 xl:h-5 2xl:w-8 2xl:h-8 text-primary" />
-          </button>
-          <HeaderClock />
-        </div>
-      </div>
+                    <div className="space-y-1.5 pt-1">
+                      <span className="text-[10px] font-semibold tracking-[0.25em] uppercase text-neutral-500 block">
+                        Code d'association
+                      </span>
+                      <div className="font-mono text-4xl lg:text-5xl font-light tracking-[0.2em] text-white leading-none">
+                        {pairingCode.slice(0, 3)} {pairingCode.slice(3)}
+                      </div>
+                    </div>
 
-      {missingIdError ? (
-        <div className="flex-1 flex flex-col items-center justify-center p-4">
-          <div className="bg-red-500/10 border border-red-500/50 p-6 2xl:p-12 rounded-none text-center">
-            <AlertTriangle className="w-12 h-12 2xl:w-24 2xl:h-24 text-red-500 mx-auto mb-4 2xl:mb-8" />
-            <h2 className="text-xl 2xl:text-4xl font-black mb-2 2xl:mb-4">ID Restaurant Manquant</h2>
-            <button onClick={() => setIsSettingsOpen(true)} className="bg-white text-black font-black uppercase text-sm 2xl:text-2xl px-4 py-2 2xl:px-8 2xl:py-4 rounded-none flex justify-center items-center gap-2 2xl:gap-4">
-              <Settings className="w-4 h-4 2xl:w-8 2xl:h-8" /> Configurer
-            </button>
-          </div>
+                    <div className="flex items-center gap-3 text-xs text-neutral-500 pt-2 border-t border-white/[0.06]">
+                      <button
+                        onClick={() => setPairingCode(generateRandomPairingCode())}
+                        className="text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                      >
+                        Générer un nouveau code
+                      </button>
+                      <span>•</span>
+                      <button
+                        onClick={() => setIsSettingsOpen(true)}
+                        className="text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                      >
+                        Configuration manuelle
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </main>
+
+          <footer className="h-[6vh] min-h-[44px] px-8 lg:px-14 flex items-center justify-between border-t border-white/[0.06] text-[11px] text-neutral-500 tracking-wider uppercase shrink-0">
+            <span>Protocole sécurisé</span>
+            <span className="font-mono text-neutral-600">
+              ID: {deviceId}
+            </span>
+          </footer>
         </div>
       ) : (
-        /* GRILLE STRICTEMENT VERROUILLÉE À 5 COLONNES x 2 RANGÉES (ZÉRO TROU / ZÉRO ÉCRASEMENT) */
-        <div className="flex-1 w-full overflow-hidden bg-slate-950">
+        <div className={`flex-1 w-full overflow-hidden bg-slate-950 ${isOffline ? 'pt-[3vh]' : ''}`}>
           <div 
             className="grid w-full h-full gap-0"
             style={{
-              gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
-              gridTemplateRows: 'repeat(2, minmax(0, 1fr))'
+              gridTemplateColumns: activeLayoutMode === 'portrait' 
+                ? 'repeat(2, minmax(0, 1fr))' 
+                : 'repeat(5, minmax(0, 1fr))',
+              gridTemplateRows: activeLayoutMode === '5x1' 
+                ? '1fr' 
+                : activeLayoutMode === '5x2' 
+                  ? 'repeat(2, minmax(0, 1fr))' 
+                  : 'repeat(3, minmax(0, 1fr))'
             }}
           >
             {currentOrders.map((order) => {
-              const status = order.status?.toLowerCase() || '';
+              const status = order.status?.trim().toLowerCase() || '';
               const isNewOrder = status === 'nouvelle';
 
               let headerBgClass = 'bg-gray-600'; 
@@ -1144,22 +1792,22 @@ const KDS = () => {
               }
 
               const cardBorderClass = isNewOrder 
-                ? 'border-[2.5px] border-red-500 animate-alert z-20' 
-                : 'border-[2px] border-slate-900 z-10';
+                ? 'border-[3px] border-red-500 animate-alert z-20' 
+                : 'border border-slate-900 z-10';
 
               return (
                 <div 
                   key={order.id} 
                   style={{
-                    gridRow: `${order.gridRow} / span ${order.rowSpan}`,
-                    gridColumn: `${order.gridCol} / span ${order.colSpan}`
+                    gridColumn: `${order.gridColStart} / span ${order.colSpan}`,
+                    gridRow: `${order.gridRowStart} / span ${order.rowSpan}`
                   }}
                   className={`bg-slate-100 flex flex-col overflow-hidden rounded-none h-full ${cardBorderClass}`}
                 >
                   {/* EN-TÊTE DU TICKET */}
-                  <div className={`${headerBgClass} px-2 py-1.5 2xl:px-3 2xl:py-2 flex justify-between items-center border-b border-black/30 flex-shrink-0 z-10`}>
-                    <div className="flex items-center gap-1.5 2xl:gap-2">
-                      {isNewOrder && <BellRing className="w-3.5 h-3.5 2xl:w-6 2xl:h-6 text-white animate-bounce" />}
+                  <div className={`${headerBgClass} px-[0.8vw] py-[0.8vh] flex justify-between items-center border-b border-black/30 flex-shrink-0 z-10`}>
+                    <div className="flex items-center gap-[0.5vw]">
+                      {isNewOrder && <BellRing className="w-[1.8vh] h-[1.8vh] text-white animate-bounce" />}
                       {getOrderTypeBadge(order.order_type_id)}
                     </div>
                     <OrderTimer 
@@ -1168,12 +1816,12 @@ const KDS = () => {
                       scheduledTime={order.scheduled_time} 
                       targetPrepMinutes={targetPrepMinutes}
                     />
-                    <div className="text-[13px] xl:text-base 2xl:text-2xl font-black text-slate-900 bg-white px-2 py-0.5 2xl:px-2.5 rounded-none shadow-sm">
+                    <div className="text-[clamp(13px,1.8vh,24px)] font-black text-slate-900 bg-white px-[0.8vw] py-[0.2vh] rounded-none shadow-sm">
                       {order.order_number || `#${order.id.toString().slice(-3)}`}
                     </div>
                   </div>
 
-                  {/* CONTENEUR DES ARTICLES */}
+                  {/* CONTENEUR DES ARTICLES AVEC SÉPARATEUR DE CLÉ SÉCURISÉ */}
                   <div className="flex-1 overflow-hidden bg-slate-50 p-0.5">
                     <div 
                       className="grid h-full" 
@@ -1194,15 +1842,14 @@ const KDS = () => {
                             const isChunkFirst = lineIdx === 0;
                             const isChunkLast = lineIdx === columnLines.length - 1;
 
-                            // 1. LIGNE PRODUIT
                             if (line.isProduct) {
                               return (
                                 <div 
                                   key={line.id}
                                   onClick={() => toggleItemDone(line.id)}
-                                  className={`min-h-0 w-full overflow-hidden flex items-center px-1.5 2xl:px-2.5 cursor-pointer transition-colors border-x border-slate-300 rounded-none ${isChunkFirst ? 'border-t' : ''} ${(!line.hasOptions || isChunkLast) ? 'border-b border-slate-400 shadow-sm' : 'border-b border-slate-200'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
+                                  className={`min-h-0 w-full overflow-hidden flex items-center px-[0.8vw] py-[0.4vh] cursor-pointer transition-colors border-x border-slate-300 rounded-none ${isChunkFirst ? 'border-t' : ''} ${(!line.hasOptions || isChunkLast) ? 'border-b border-slate-400 shadow-sm' : 'border-b border-slate-200'} ${isDone ? 'bg-emerald-500' : 'bg-white'}`}
                                 >
-                                  <span className={`px-1.5 py-0.5 rounded-none ${currentProductFont.qtyClass} font-black mr-1.5 2xl:mr-2 flex-shrink-0 leading-none ${isDone ? 'bg-emerald-700 text-white' : 'bg-slate-900 text-white'}`}>
+                                  <span className={`px-[0.5vw] py-[0.3vh] rounded-none ${currentProductFont.qtyClass} font-black mr-[0.6vw] flex-shrink-0 leading-none ${isDone ? 'bg-emerald-700 text-white' : 'bg-slate-900 text-white'}`}>
                                     {line.qty}x
                                   </span>
                                   <span className={`${currentProductFont.textClass} font-black uppercase leading-tight truncate ${isDone ? 'text-emerald-950' : 'text-slate-950'}`}>
@@ -1210,10 +1857,7 @@ const KDS = () => {
                                   </span>
                                 </div>
                               );
-                            } 
-                            
-                            // 2. LIGNE OPTION
-                            else {
+                            } else {
                               let bgClass = (line.groupIdx % 2 === 0) ? 'bg-[#0f172a]' : 'bg-[#475569]';
                               let textClass = 'text-white';
                               let iconColor = (line.groupIdx % 2 === 0) ? 'text-amber-400' : 'text-cyan-300';
@@ -1234,14 +1878,14 @@ const KDS = () => {
                               const itemsList = line.items && line.items.length > 0 ? line.items : [];
 
                               let optFontSizeClass = currentOptionFont.single;
-                              let optPaddingClass = "px-1.5 2xl:px-2";
+                              let optPaddingClass = "px-[0.6vw]";
 
                               if (itemsList.length === 2) {
                                 optFontSizeClass = currentOptionFont.double;
-                                optPaddingClass = "px-1";
+                                optPaddingClass = "px-[0.4vw]";
                               } else if (itemsList.length >= 3) {
                                 optFontSizeClass = currentOptionFont.triple;
-                                optPaddingClass = "px-0.5";
+                                optPaddingClass = "px-[0.3vw]";
                               }
 
                               return (
@@ -1253,9 +1897,9 @@ const KDS = () => {
                                   {itemsList.map((opt: any, optIdx: number) => (
                                     <div 
                                       key={optIdx} 
-                                      className={`flex-1 min-w-0 flex items-center justify-start ${optPaddingClass} h-full gap-1 ${optIdx < itemsList.length - 1 ? dividerClass : ''}`}
+                                      className={`flex-1 min-w-0 flex items-center justify-start ${optPaddingClass} py-[0.3vh] h-full gap-1 ${optIdx < itemsList.length - 1 ? dividerClass : ''}`}
                                     >
-                                      <span className={`text-[9px] xl:text-[10px] 2xl:text-[13px] font-black flex-shrink-0 leading-none ${iconColor}`}>
+                                      <span className={`text-[clamp(11px,1.2vh,16px)] font-black flex-shrink-0 leading-none ${iconColor}`}>
                                         {opt.isSans ? '✕' : '+'}
                                       </span>
                                       <span className={`${optFontSizeClass} font-black uppercase leading-tight truncate w-full ${textClass}`}>
@@ -1275,12 +1919,12 @@ const KDS = () => {
                   {/* BOUTON D'ACTION INFÉRIEUR */}
                   <div className="flex-shrink-0 border-t border-slate-900 z-10">
                     {isNewOrder ? (
-                      <button onClick={() => acceptOrder(order.id)} className="w-full bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white font-black text-[11px] xl:text-sm 2xl:text-xl uppercase tracking-widest py-1.5 2xl:py-3 transition-all flex justify-center items-center gap-1.5 2xl:gap-3 rounded-none">
-                        <BellRing className="w-3.5 h-3.5 2xl:w-6 2xl:h-6" /> Accepter
+                      <button onClick={() => acceptOrder(order.id)} className="w-full bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white font-black text-[clamp(12px,1.6vh,22px)] uppercase tracking-widest py-[1.2vh] transition-all flex justify-center items-center gap-2 rounded-none cursor-pointer">
+                        <BellRing className="w-[1.8vh] h-[1.8vh]" /> Accepter
                       </button>
                     ) : (
-                      <button onClick={() => markOrderAsReady(order.id)} className="w-full bg-emerald-500 hover:bg-emerald-600 active:scale-[0.99] text-slate-900 font-black text-[11px] xl:text-sm 2xl:text-xl uppercase tracking-widest py-1.5 2xl:py-3 transition-all flex justify-center items-center gap-1.5 2xl:gap-3 rounded-none">
-                        <CheckCircle2 className="w-4 h-4 2xl:w-6 2xl:h-6" strokeWidth={3} /> Prêt
+                      <button onClick={() => markOrderAsReady(order.id)} className="w-full bg-emerald-500 hover:bg-emerald-600 active:scale-[0.99] text-slate-900 font-black text-[clamp(12px,1.6vh,22px)] uppercase tracking-widest py-[1.2vh] transition-all flex justify-center items-center gap-2 rounded-none cursor-pointer">
+                        <CheckCircle2 className="w-[1.8vh] h-[1.8vh]" strokeWidth={3} /> Prêt
                       </button>
                     )}
                   </div>
@@ -1291,7 +1935,162 @@ const KDS = () => {
         </div>
       )}
 
-      {/* --- MODAL COMMANDES PROGRAMMÉES --- */}
+      {/* BARRE DE CONTRÔLE DÉPLACÉE EN BAS */}
+      <footer className="h-[6vh] min-h-[48px] px-4 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 flex items-center justify-between z-20 flex-shrink-0">
+        
+        <div className="flex items-center gap-2.5 shrink-0">
+          <span className="text-[clamp(12px,1.4vh,18px)] font-black tracking-widest uppercase text-slate-400">
+            {selectedCategories.length > 0 || dbHiddenCategories.length > 0 ? "KDS (FILTRÉ)" : "KDS CUISINE"}
+          </span>
+          {!!activeRestoId && (
+            <span className="text-[clamp(11px,1.3vh,16px)] font-black bg-slate-800 text-amber-400 px-3 py-0.5 rounded-full border border-slate-700">
+              {allDisplayOrders.length}
+            </span>
+          )}
+        </div>
+
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1.5 bg-slate-950/80 p-1.5 rounded-xl border border-slate-800/80 shadow-inner">
+            <button
+              type="button"
+              disabled={currentPage <= 1}
+              onClick={goToPrevPage}
+              className={`h-[4.2vh] w-[4.2vh] min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg transition-all active:scale-90 cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed ${
+                prevPageHasNew 
+                  ? 'bg-red-600 text-white animate-pulse ring-2 ring-red-400' 
+                  : prevPageHasLate 
+                    ? 'text-amber-400 hover:text-white hover:bg-slate-800' 
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+              title="Page précédente"
+            >
+              {prevPageHasNew ? (
+                <BellRing size={18} className="text-white animate-bounce" />
+              ) : (
+                <ChevronLeft size={20} />
+              )}
+            </button>
+
+            <div className="flex items-center gap-1.5 px-1.5">
+              {paginatedPages.map((pageOrders, idx) => {
+                const pageNum = idx + 1;
+                const isActive = pageNum === currentPage;
+                const pageHasNew = pageOrders.some(o => o.status?.trim().toLowerCase() === 'nouvelle');
+
+                return (
+                  <button
+                    key={pageNum}
+                    type="button"
+                    onClick={() => setCurrentPage(pageNum)}
+                    className={`h-[3.8vh] min-h-[32px] px-3 rounded-lg text-[clamp(11px,1.3vh,16px)] font-black transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-amber-500 text-slate-950 shadow-md font-black scale-105'
+                        : pageHasNew
+                          ? 'bg-red-600 text-white animate-pulse'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                  >
+                    {pageNum}
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              disabled={currentPage >= totalPages}
+              onClick={goToNextPage}
+              className={`h-[4.2vh] w-[4.2vh] min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg transition-all active:scale-90 cursor-pointer disabled:opacity-20 disabled:cursor-not-allowed ${
+                nextPageHasNew 
+                  ? 'bg-red-600 text-white animate-pulse ring-2 ring-red-400' 
+                  : nextPageHasLate 
+                    ? 'text-amber-400 hover:text-white hover:bg-slate-800' 
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+              title="Page suivante"
+            >
+              {nextPageHasNew ? (
+                <BellRing size={18} className="text-white animate-bounce" />
+              ) : (
+                <ChevronRight size={20} />
+              )}
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2.5 shrink-0">
+          <button 
+            type="button"
+            onClick={() => setIsScheduledModalOpen(true)}
+            className={`h-[4.4vh] min-h-[40px] px-3.5 rounded-xl font-black text-[clamp(11px,1.35vh,16px)] flex items-center gap-2 transition-all cursor-pointer border ${
+              futureScheduledCount > 0 
+                ? 'bg-amber-500/20 text-amber-400 border-amber-500/60 shadow-md' 
+                : 'bg-slate-800/50 text-slate-300 hover:text-white hover:bg-slate-800 border-slate-700/60'
+            }`}
+            title="Commandes programmées"
+          >
+            <CalendarClock className="w-[2.2vh] h-[2.2vh] min-w-[20px] min-h-[20px]" />
+            {futureScheduledCount > 0 && (
+              <span className="font-black text-[clamp(10px,1.2vh,14px)] bg-amber-500 text-slate-950 px-2 py-0.5 rounded-full">
+                {futureScheduledCount}
+              </span>
+            )}
+          </button>
+
+          <button 
+            type="button"
+            onClick={() => setIsHistoryOpen(true)} 
+            className="h-[4.4vh] w-[4.4vh] min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl bg-slate-800/50 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60 transition-colors relative cursor-pointer"
+            title="Historique"
+          >
+            <History className="w-[2.3vh] h-[2.3vh] min-w-[22px] min-h-[22px]" />
+            {historyOrders.length > 0 && (
+              <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-slate-900" />
+            )}
+          </button>
+
+          <button 
+            type="button"
+            onClick={toggleAudioStatus} 
+            className={`h-[4.4vh] w-[4.4vh] min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl transition-colors cursor-pointer border ${
+              audioEnabled 
+                ? 'bg-slate-800/50 text-slate-300 hover:text-white hover:bg-slate-800 border-slate-700/60' 
+                : 'bg-red-500/20 text-red-400 border-red-500/50 animate-pulse'
+            }`} 
+            title="Son"
+          >
+            {audioEnabled ? (
+              <Volume2 className="w-[2.3vh] h-[2.3vh] min-w-[22px] min-h-[22px]" />
+            ) : (
+              <VolumeX className="w-[2.3vh] h-[2.3vh] min-w-[22px] min-h-[22px]" />
+            )}
+          </button>
+
+          <button 
+            type="button"
+            onClick={() => { fetchOrders(); fetchCatalog(); fetchKdsOptionsMetadata(); }} 
+            className="h-[4.4vh] w-[4.4vh] min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl bg-slate-800/50 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60 transition-colors cursor-pointer"
+            title="Actualiser"
+          >
+            <RefreshCcw className={`w-[2.2vh] h-[2.2vh] min-w-[20px] min-h-[20px] ${isLoading ? "animate-spin text-amber-400" : ""}`} />
+          </button>
+
+          <button 
+            type="button"
+            onClick={() => setIsSettingsOpen(true)} 
+            className="h-[4.4vh] w-[4.4vh] min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl bg-slate-800/50 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60 transition-colors cursor-pointer"
+            title="Paramètres"
+          >
+            <Settings className="w-[2.2vh] h-[2.2vh] min-w-[20px] min-h-[20px]" />
+          </button>
+
+          <div className="w-px h-6 bg-slate-700 mx-1"></div>
+
+          <HeaderClock />
+        </div>
+      </footer>
+
+      {/* MODAL COMMANDES PROGRAMMÉES */}
       <ScheduledOrdersModal
         isOpen={isScheduledModalOpen}
         onClose={() => setIsScheduledModalOpen(false)}
@@ -1300,37 +2099,43 @@ const KDS = () => {
         themeColors={themeColors}
       />
 
-      {/* --- MODAL HISTORIQUE --- */}
+      {/* MODAL HISTORIQUE */}
       {isHistoryOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 2xl:p-12">
-          <div className="bg-secondary p-4 2xl:p-8 w-full max-w-2xl 2xl:max-w-5xl border border-white/10 flex flex-col max-h-[85vh] rounded-none">
-            <div className="flex justify-between items-center mb-4 2xl:mb-8">
-              <h2 className="text-lg 2xl:text-3xl font-black uppercase text-white flex items-center gap-2 2xl:gap-4"><History className="w-5 h-5 2xl:w-8 2xl:h-8"/> Historique</h2>
-              <button onClick={() => setIsHistoryOpen(false)} className="text-white/50 hover:text-white"><X className="w-5 h-5 2xl:w-8 2xl:h-8" /></button>
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-secondary p-6 w-full max-w-3xl border border-white/10 flex flex-col max-h-[85vh] rounded-none">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-black uppercase text-white flex items-center gap-3"><History size={24}/> Historique</h2>
+              <button onClick={() => setIsHistoryOpen(false)} className="text-white/50 hover:text-white"><X size={24} /></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 2xl:space-y-4">
+            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
               {historyOrders.length === 0 ? (
-                <div className="text-center py-6 2xl:py-12 text-white/40 text-xs 2xl:text-xl">Aucune commande récente</div>
+                <div className="text-center py-8 text-white/40 text-sm">Aucune commande récente</div>
               ) : (
                 historyOrders.map(order => {
                   const isClosed = order.status?.toLowerCase() === 'fermé' || order.status?.toLowerCase() === 'ferme' || order.status?.toLowerCase() === 'annulée';
                   const items = parseOrderDetails(order.order_details);
 
                   return (
-                    <div key={order.id} className="bg-white/5 border border-white/10 p-3 2xl:p-6 flex justify-between items-center rounded-none">
+                    <div key={order.id} className="bg-white/5 border border-white/10 p-4 flex justify-between items-center rounded-none">
                       <div>
-                        <div className="flex items-center gap-2 2xl:gap-4 mb-1 2xl:mb-3">
-                          <span className="font-black text-sm 2xl:text-2xl text-white">{order.order_number || `#${order.id.toString().slice(-3)}`}</span>
-                          <span className={`px-2 py-0.5 2xl:px-3 2xl:py-1 text-[9px] 2xl:text-sm font-black uppercase rounded-none ${isClosed ? 'bg-white/10 text-white/50' : 'bg-emerald-500/20 text-emerald-400'}`}>{order.status}</span>
+                        <div className="flex items-center gap-3 mb-2">
+                          <span className="font-black text-lg text-white">{order.order_number || `#${order.id.toString().slice(-3)}`}</span>
+                          <span className={`px-2.5 py-0.5 text-xs font-black uppercase rounded-none ${isClosed ? 'bg-white/10 text-white/50' : 'bg-emerald-500/20 text-emerald-400'}`}>{order.status}</span>
                         </div>
-                        <div className="text-[11px] 2xl:text-lg text-white/60">
-                          {items.filter(Boolean).map((i: any) => `${i.quantity || 1}x ${i.product?.name || i.name || 'Article'}`).join(' • ')}
+                        <div className="text-sm text-white/60">
+                          {items.filter(Boolean).map((i: any) => {
+                            const rawName = i.product?.name || i.name || 'Article';
+                            const pId = (i.product?.id || i.id || i.product_id || '').toString().trim();
+                            const basePId = pId.includes('-') ? pId.split('-')[0] : pId;
+                            const displayName = i.product?.name_kds || i.name_kds || productKdsDict[basePId] || productKdsDict[pId] || productKdsDict[rawName.toLowerCase().trim()] || rawName;
+                            return `${i.quantity || 1}x ${displayName}`;
+                          }).join(' • ')}
                         </div>
                       </div>
                       
-                      <button onClick={() => revertOrder(order.id)} className="bg-white/10 hover:bg-amber-500 hover:text-slate-900 text-white font-black px-3 py-1.5 2xl:px-6 2xl:py-3 text-[10px] 2xl:text-base uppercase rounded-none transition-colors flex items-center gap-1 2xl:gap-2">
-                        <RotateCcw className="w-3 h-3 2xl:w-5 2xl:h-5" /> Restaurer
+                      <button onClick={() => revertOrder(order.id)} className="bg-white/10 hover:bg-amber-500 hover:text-slate-900 text-white font-black px-4 py-2 text-xs uppercase rounded-none transition-colors flex items-center gap-2">
+                        <RotateCcw size={16} /> Restaurer
                       </button>
                     </div>
                   );
@@ -1341,40 +2146,177 @@ const KDS = () => {
         </div>
       )}
 
-      {/* --- PARAMÈTRES --- */}
+      {/* MODAL PARAMÈTRES */}
       {isSettingsOpen && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 2xl:p-12">
-          <div className="bg-secondary w-full max-w-2xl 2xl:max-w-5xl border border-white/10 flex flex-col rounded-none">
-            <div className="p-4 2xl:p-8 border-b border-white/10 flex justify-between items-center bg-secondary">
-              <h2 className="text-base 2xl:text-3xl font-black uppercase text-white flex items-center gap-2 2xl:gap-4" onClick={() => setAdminUnlockCount(p => p + 1)}><Settings className="w-5 h-5 2xl:w-8 2xl:h-8"/> Paramètres</h2>
-              <button onClick={() => { setIsSettingsOpen(false); setAdminUnlockCount(0); }} className="text-white/50 hover:text-white p-1 2xl:p-2"><X className="w-5 h-5 2xl:w-8 2xl:h-8" /></button>
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
+          <div className="bg-secondary w-full max-w-3xl border border-white/10 flex flex-col rounded-none">
+            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-secondary">
+              <h2 
+                className="text-xl font-black uppercase text-white flex items-center gap-3 cursor-pointer select-none" 
+                onClick={() => {
+                  setAdminUnlockCount(prev => {
+                    const next = prev + 1;
+                    if (next === 5) toast.info("Mode Administrateur déverrouillé");
+                    return next;
+                  });
+                }}
+              >
+                <Settings size={24}/> Paramètres KDS
+              </h2>
+              <button onClick={() => { setIsSettingsOpen(false); setAdminUnlockCount(0); }} className="text-white/50 hover:text-white p-1"><X size={24} /></button>
             </div>
 
-            <div className="p-4 2xl:p-8 space-y-6 2xl:space-y-8 overflow-y-auto max-h-[75vh] custom-scrollbar">
+            <div className="p-6 space-y-6 overflow-y-auto max-h-[75vh] custom-scrollbar">
               
-              {(!activeRestoId || adminUnlockCount >= 5) && (
-                <div>
-                  <label className="block text-[11px] 2xl:text-lg font-bold text-emerald-500 uppercase mb-2 2xl:mb-4">ID du Restaurant</label>
-                  <div className="flex gap-2 2xl:gap-4">
-                    <input type="text" value={tempRestoId} onChange={(e) => setTempRestoId(e.target.value)} className="flex-1 bg-black/50 border border-white/20 px-3 py-2 2xl:px-6 2xl:py-4 text-white text-xs 2xl:text-xl rounded-none focus:outline-none focus:border-emerald-500" />
-                    <button onClick={handleSaveSettings} className="bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-black uppercase px-4 py-2 2xl:px-8 2xl:py-4 text-[11px] 2xl:text-xl rounded-none">Sauver</button>
+              {/* SECTION ADMIN MASQUÉE (DÉVERROUILLÉE PAR 5 CLICS SUR LE TITRE) */}
+              {adminUnlockCount >= 5 && (
+                <div className="border border-white/15 bg-black/60 p-5 rounded-2xl space-y-5">
+                  <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                    <span className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-300 flex items-center gap-2">
+                      <QrCode size={16} className="text-emerald-400" /> Administration & Appairage
+                    </span>
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-400 font-bold px-2 py-0.5 rounded-full border border-emerald-500/20">
+                      Déverrouillé
+                    </span>
                   </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-center bg-black/80 p-4 rounded-xl border border-white/10">
+                    <div className="flex flex-col items-center">
+                      <div className="bg-white p-3 rounded-xl shadow-lg">
+                        <img src={qrImageUrl} alt="QR Code KDS" className="w-36 h-36 object-contain block" />
+                      </div>
+                      <span className="text-[10px] text-neutral-400 uppercase font-semibold mt-2 tracking-wider">
+                        Scanner avec la PWA
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col items-center text-center gap-2">
+                      <span className="text-[11px] font-medium uppercase tracking-[0.2em] text-neutral-400">
+                        Code d'association
+                      </span>
+                      <div className="font-mono font-light text-3xl tracking-[0.2em] text-white">
+                        {pairingCode.slice(0, 3)} {pairingCode.slice(3)}
+                      </div>
+                      <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1.5 pt-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        Prêt pour jumelage
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-1">
+                    <label className="block text-xs font-medium text-neutral-400 uppercase tracking-wider mb-1.5">
+                      Identifiant Restaurant (UUID)
+                    </label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        value={tempRestoId} 
+                        onChange={(e) => setTempRestoId(e.target.value)} 
+                        placeholder="UUID du restaurant..."
+                        className="flex-1 bg-black/60 border border-white/20 px-3 py-2 text-white text-xs rounded-xl focus:outline-none focus:border-white/40" 
+                      />
+                      <button 
+                        type="button"
+                        onClick={handleSaveSettings} 
+                        className="bg-white hover:bg-neutral-200 text-black font-semibold uppercase px-4 py-2 text-xs rounded-xl transition-colors cursor-pointer"
+                      >
+                        Sauver
+                      </button>
+                    </div>
+                  </div>
+
+                  {activeRestoId && (
+                    <div className="pt-2 border-t border-white/10 flex items-center justify-between">
+                      <span className="text-xs text-neutral-400">
+                        Déconnecter cet écran de l'établissement actuel :
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsUnlinkModalOpen(true);
+                          setUnlinkPin('');
+                          setUnlinkError('');
+                        }}
+                        className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-semibold uppercase px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Unlink size={14} /> Dissocier (PIN)
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* 1. TAILLE POLICE PRODUIT */}
-              <div className="border-t border-white/10 pt-4 2xl:pt-6">
-                <h3 className="text-xs 2xl:text-xl font-black uppercase text-white mb-3 flex items-center gap-1.5 2xl:gap-3">
-                  <Type className="w-3.5 h-3.5 2xl:w-6 2xl:h-6 text-amber-500"/> Taille police des produits
+              {/* DISPOSITION DE LA GRILLE */}
+              <div className="border-t border-white/10 pt-4">
+                <h3 className="text-sm font-black uppercase text-white mb-3 flex items-center gap-2">
+                  <LayoutGrid size={18} className="text-amber-500"/> Disposition de la grille KDS
                 </h3>
-                <div className="grid grid-cols-4 gap-2 2xl:gap-3">
+
+                {isPortrait ? (
+                  <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-none flex items-center gap-3 text-amber-300">
+                    <Smartphone size={24} className="shrink-0" />
+                    <div>
+                      <div className="text-sm font-black uppercase">Mode Portrait Actif (Automatique)</div>
+                      <div className="text-xs text-white/70">
+                        L'écran est détecté en position verticale. La grille est automatiquement verrouillée en 2 colonnes x 3 rangées adaptées aux bornes et totems.
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleChangeLayoutMode('5x1')}
+                      className={`p-3.5 text-left border rounded-none transition-all flex flex-col justify-between ${
+                        landscapeLayoutMode === '5x1'
+                          ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-lg'
+                          : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-black text-sm uppercase">1 Ligne (5 Colonnes)</span>
+                        <Monitor size={18} />
+                      </div>
+                      <p className={`text-xs ${landscapeLayoutMode === '5x1' ? 'text-slate-900 font-semibold' : 'text-white/50'}`}>
+                        Pleine hauteur sans saut vertical. Parfait pour les commandes burger, menus complets et longs tickets.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleChangeLayoutMode('5x2')}
+                      className={`p-3.5 text-left border rounded-none transition-all flex flex-col justify-between ${
+                        landscapeLayoutMode === '5x2'
+                          ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-lg'
+                          : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-black text-sm uppercase">2 Lignes (10 Cases)</span>
+                        <LayoutGrid size={18} />
+                      </div>
+                      <p className={`text-xs ${landscapeLayoutMode === '5x2' ? 'text-slate-900 font-semibold' : 'text-white/50'}`}>
+                        Grille dense 5x2 avec anti-trou intelligent. Idéal pour voir un maximum de commandes rapides d'un coup.
+                      </p>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* POLICE PRODUITS */}
+              <div className="border-t border-white/10 pt-4">
+                <h3 className="text-sm font-black uppercase text-white mb-3 flex items-center gap-2">
+                  <Type size={18} className="text-amber-500"/> Taille police des produits
+                </h3>
+                <div className="grid grid-cols-4 gap-2">
                   {Object.entries(PRODUCT_FONT_CONFIGS).map(([key, cfg]) => (
                     <button
                       key={key}
                       onClick={() => handleChangeProductFontSize(key)}
-                      className={`py-2 2xl:py-3 px-2 font-black text-[11px] 2xl:text-base uppercase rounded-none transition-colors border ${
+                      className={`py-2 px-2 font-black text-xs uppercase rounded-none transition-colors border ${
                         productFontSize === key
-                          ? 'bg-amber-500 text-slate-900 border-amber-500'
+                          ? 'bg-amber-500 text-slate-950 border-amber-500'
                           : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
                       }`}
                     >
@@ -1384,17 +2326,17 @@ const KDS = () => {
                 </div>
               </div>
 
-              {/* 2. TAILLE POLICE OPTIONS */}
-              <div className="border-t border-white/10 pt-4 2xl:pt-6">
-                <h3 className="text-xs 2xl:text-xl font-black uppercase text-white mb-3 flex items-center gap-1.5 2xl:gap-3">
-                  <Type className="w-3.5 h-3.5 2xl:w-6 2xl:h-6 text-cyan-400"/> Taille police des options
+              {/* POLICE OPTIONS */}
+              <div className="border-t border-white/10 pt-4">
+                <h3 className="text-sm font-black uppercase text-white mb-3 flex items-center gap-2">
+                  <Type size={18} className="text-cyan-400"/> Taille police des options
                 </h3>
-                <div className="grid grid-cols-3 gap-2 2xl:gap-3">
+                <div className="grid grid-cols-3 gap-2">
                   {Object.entries(OPTION_FONT_CONFIGS).map(([key, cfg]) => (
                     <button
                       key={key}
                       onClick={() => handleChangeOptionFontSize(key)}
-                      className={`py-2 2xl:py-3 px-2 font-black text-[11px] 2xl:text-base uppercase rounded-none transition-colors border ${
+                      className={`py-2 px-2 font-black text-xs uppercase rounded-none transition-colors border ${
                         optionFontSize === key
                           ? 'bg-cyan-400 text-slate-900 border-cyan-400'
                           : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
@@ -1406,17 +2348,17 @@ const KDS = () => {
                 </div>
               </div>
 
-              {/* DISPOSITION DES OPTIONS KDS */}
-              <div className="border-t border-white/10 pt-4 2xl:pt-6">
-                <h3 className="text-xs 2xl:text-xl font-black uppercase text-white mb-2 2xl:mb-4 flex items-center gap-1.5 2xl:gap-3">
-                  <LayoutGrid className="w-3.5 h-3.5 2xl:w-6 2xl:h-6 text-amber-500"/> Disposition des options
+              {/* DISPOSITION GROUPÉE DES OPTIONS */}
+              <div className="border-t border-white/10 pt-4">
+                <h3 className="text-sm font-black uppercase text-white mb-2 flex items-center gap-2">
+                  <LayoutGrid size={18} className="text-amber-500"/> Disposition des options
                 </h3>
-                <div className="flex items-center justify-between bg-white/5 p-3 2xl:p-5 border border-white/10 rounded-none">
+                <div className="flex items-center justify-between bg-white/5 p-4 border border-white/10 rounded-none">
                   <div className="pr-4">
-                    <div className="text-xs 2xl:text-lg font-bold text-white uppercase">
+                    <div className="text-sm font-bold text-white uppercase">
                       Grouper les options d'un même groupe
                     </div>
-                    <div className="text-[10px] 2xl:text-sm text-white/50 mt-0.5">
+                    <div className="text-xs text-white/50 mt-1">
                       {groupOptionsInline 
                         ? "Activé : Les options d'un même groupe s'affichent côte à côte avec police auto-adaptée." 
                         : "Désactivé : Chaque option occupe sa propre ligne pleine largeur (lisibilité maximale)."}
@@ -1424,7 +2366,7 @@ const KDS = () => {
                   </div>
                   <button
                     onClick={toggleGroupOptionsInline}
-                    className={`px-4 py-2 2xl:px-6 2xl:py-3 font-black text-xs 2xl:text-base uppercase rounded-none transition-colors shrink-0 ${
+                    className={`px-4 py-2 font-black text-xs uppercase rounded-none transition-colors shrink-0 ${
                       groupOptionsInline 
                         ? 'bg-emerald-500 text-slate-900' 
                         : 'bg-white/10 text-white hover:bg-white/20'
@@ -1436,15 +2378,15 @@ const KDS = () => {
               </div>
 
               {/* FILTRES PAR CATÉGORIE */}
-              <div className="border-t border-white/10 pt-4 2xl:pt-6">
-                <div className="flex justify-between items-end mb-2 2xl:mb-4">
-                  <h3 className="text-xs 2xl:text-xl font-black uppercase text-white flex items-center gap-1.5 2xl:gap-3"><Filter className="w-3.5 h-3.5 2xl:w-6 2xl:h-6 text-amber-500"/> Filtres par catégorie</h3>
-                  {selectedCategories.length > 0 && <button onClick={() => { setSelectedCategories([]); localStorage.removeItem('kds_selected_categories'); }} className="text-[10px] 2xl:text-base text-red-400 font-bold uppercase">Tout afficher</button>}
+              <div className="border-t border-white/10 pt-4">
+                <div className="flex justify-between items-end mb-3">
+                  <h3 className="text-sm font-black uppercase text-white flex items-center gap-2"><Filter size={18} className="text-amber-500"/> Filtres par catégorie</h3>
+                  {selectedCategories.length > 0 && <button onClick={() => { setSelectedCategories([]); localStorage.removeItem('kds_selected_categories'); }} className="text-xs text-red-400 font-bold uppercase">Tout afficher</button>}
                 </div>
                 
-                <div className="flex flex-wrap gap-2 2xl:gap-4">
+                <div className="flex flex-wrap gap-2">
                   {availableCategories.map(cat => (
-                    <button key={cat} onClick={() => toggleCategory(cat)} className={`px-3 py-1.5 2xl:px-6 2xl:py-3 text-[10px] 2xl:text-base font-black uppercase border rounded-none transition-colors ${selectedCategories.map(c => c.toLowerCase().trim()).includes(cat.toLowerCase().trim()) ? 'bg-amber-500 text-slate-900 border-amber-500' : 'bg-transparent text-white/70 border-white/20'}`}>
+                    <button key={cat} onClick={() => toggleCategory(cat)} className={`px-3 py-1.5 text-xs font-black uppercase border rounded-none transition-colors ${selectedCategories.map(c => c.toLowerCase().trim()).includes(cat.toLowerCase().trim()) ? 'bg-amber-500 text-slate-900 border-amber-500' : 'bg-transparent text-white/70 border-white/20'}`}>
                       {cat}
                     </button>
                   ))}
@@ -1452,6 +2394,68 @@ const KDS = () => {
               </div>
 
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DISSOCIATION (PIN 1234) */}
+      {isUnlinkModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-white/20 p-6 md:p-8 w-full max-w-md shadow-2xl rounded-2xl text-center">
+            <div className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mx-auto mb-4 text-white">
+              <KeyRound className="w-6 h-6" />
+            </div>
+
+            <h2 className="text-xl font-bold uppercase tracking-wider text-white mb-2">
+              Dissocier l'écran KDS
+            </h2>
+            <p className="text-xs text-neutral-400 mb-6 leading-relaxed">
+              Veuillez saisir le code PIN de sécurité (1234) pour déconnecter cet écran et revenir à l'état initial d'appairage.
+            </p>
+
+            <form onSubmit={handleConfirmUnlink} className="space-y-4">
+              <div>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={8}
+                  autoFocus
+                  placeholder="Code PIN"
+                  value={unlinkPin}
+                  onChange={(e) => {
+                    setUnlinkPin(e.target.value);
+                    if (unlinkError) setUnlinkError('');
+                  }}
+                  className="w-full bg-black border border-white/20 focus:border-white/60 text-white text-center text-2xl tracking-widest py-3 px-4 rounded-xl focus:outline-none font-mono"
+                />
+                {unlinkError && (
+                  <p className="text-xs text-rose-400 font-semibold mt-2">
+                    {unlinkError}
+                  </p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsUnlinkModalOpen(false);
+                    setUnlinkPin('');
+                    setUnlinkError('');
+                  }}
+                  className="bg-white/10 hover:bg-white/15 text-white font-medium text-xs uppercase py-3 rounded-xl transition-colors cursor-pointer"
+                >
+                  Annuler
+                </button>
+
+                <button
+                  type="submit"
+                  className="bg-white hover:bg-neutral-200 text-black font-semibold text-xs uppercase py-3 rounded-xl transition-colors cursor-pointer shadow-md"
+                >
+                  Confirmer
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
