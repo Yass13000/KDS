@@ -156,11 +156,9 @@ const extractOptionLinesForKDS = (
     const normName = normalizeText(rawName);
     const cleanNormName = normName.replace(/^sans\s+/, '');
 
-    // 1. Recherche dans les options classiques
     if (optionNameKdsDict[normName]) return optionNameKdsDict[normName];
     if (cleanNormName && optionNameKdsDict[cleanNormName]) return optionNameKdsDict[cleanNormName];
 
-    // 2. Recherche dans les produits utilisés comme options (boissons / desserts de menu)
     const optId = (opt.id || opt.product_id || '').toString().trim();
     const baseOptId = optId.includes('-') ? optId.split('-')[0] : optId;
     if (baseOptId && productKdsDict[baseOptId]) return productKdsDict[baseOptId];
@@ -213,7 +211,6 @@ const extractOptionLinesForKDS = (
     }
   });
 
-  // Ingrédients retirés ("✕ ...") affichés en tête
   if (sansItems.length > 0) {
     if (groupInline) {
       for (let i = 0; i < sansItems.length; i += 2) {
@@ -226,7 +223,6 @@ const extractOptionLinesForKDS = (
     }
   }
 
-  // Tri des groupes selon sort_kds
   normalGroups.sort((a, b) => a.sortOrder - b.sortOrder);
 
   normalGroups.forEach(grp => {
@@ -670,6 +666,11 @@ const KDS = () => {
     return localStorage.getItem('kds_option_font_size') || 'normal';
   });
 
+  // CHOIX DU SON DES COMMANDES : 'chime' (Web Audio par défaut) ou 'mp3' (/son.mp3)
+  const [soundType, setSoundType] = useState<'chime' | 'mp3'>(() => {
+    return (localStorage.getItem('kds_sound_type') as 'chime' | 'mp3') || 'chime';
+  });
+
   const [themeColors, setThemeColors] = useState({ primary: '#FBBF24', secondary: '#1e293b' });
   const [targetPrepMinutes, setTargetPrepMinutes] = useState<number>(15);
 
@@ -691,7 +692,6 @@ const KDS = () => {
   const [doneItems, setDoneItems] = useState<Record<string, boolean>>({});
   const [optionGroupMapping, setOptionGroupMapping] = useState<Record<string, string>>({});
 
-  // Enregistrement du code d'appairage dans screen_pairings
   useEffect(() => {
     if (activeRestoId && adminUnlockCount < 5) return;
 
@@ -716,11 +716,24 @@ const KDS = () => {
     registerScreenPairing();
   }, [pairingCode, activeRestoId, adminUnlockCount]);
 
-  // Carillon Web Audio harmonique (D5 -> A5)
+  // Audio refs
   const audioCtxRef = useRef<AudioContext | null>(null);
   const chimeLoopTimerRef = useRef<any>(null);
   const isLoopingSoundRef = useRef<boolean>(false);
+  const mp3AudioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Pré-chargement du MP3 en toute sécurité
+  useEffect(() => {
+    try {
+      const audio = new Audio('/son.mp3');
+      audio.preload = 'auto';
+      mp3AudioRef.current = audio;
+    } catch (e) {
+      console.warn("Impossible d'initialiser le fichier MP3:", e);
+    }
+  }, []);
+
+  // Carillon Web Audio harmonique (D5 -> A5)
   const playScreenCallChime = useCallback(() => {
     try {
       const AudioCtxClass =
@@ -768,16 +781,45 @@ const KDS = () => {
     }
   }, []);
 
+  // Lecture MP3 sécurisée
+  const playMp3Sound = useCallback(() => {
+    try {
+      if (!mp3AudioRef.current) {
+        mp3AudioRef.current = new Audio('/son.mp3');
+      }
+      mp3AudioRef.current.currentTime = 0;
+      const playPromise = mp3AudioRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn("Lecture du son MP3 bloquée ou indisponible :", err);
+          playScreenCallChime();
+        });
+      }
+    } catch (e) {
+      console.warn("Erreur MP3 KDS :", e);
+      playScreenCallChime();
+    }
+  }, [playScreenCallChime]);
+
+  // Déclenchement selon le son choisi
+  const playConfiguredAlertSound = useCallback(() => {
+    if (soundType === 'mp3') {
+      playMp3Sound();
+    } else {
+      playScreenCallChime();
+    }
+  }, [soundType, playMp3Sound, playScreenCallChime]);
+
   const startLoopingSound = useCallback(() => {
     if (!audioEnabled || isLoopingSoundRef.current) return;
     isLoopingSoundRef.current = true;
-    playScreenCallChime();
+    playConfiguredAlertSound();
 
     if (chimeLoopTimerRef.current) clearInterval(chimeLoopTimerRef.current);
     chimeLoopTimerRef.current = setInterval(() => {
-      playScreenCallChime();
+      playConfiguredAlertSound();
     }, 2500);
-  }, [audioEnabled, playScreenCallChime]);
+  }, [audioEnabled, playConfiguredAlertSound]);
 
   const stopLoopingSound = useCallback(() => {
     isLoopingSoundRef.current = false;
@@ -785,7 +827,23 @@ const KDS = () => {
       clearInterval(chimeLoopTimerRef.current);
       chimeLoopTimerRef.current = null;
     }
+    if (mp3AudioRef.current) {
+      mp3AudioRef.current.pause();
+      mp3AudioRef.current.currentTime = 0;
+    }
   }, []);
+
+  const handleChangeSoundType = (type: 'chime' | 'mp3') => {
+    setSoundType(type);
+    localStorage.setItem('kds_sound_type', type);
+    if (type === 'mp3') {
+      playMp3Sound();
+      toast.success("Sonnerie : Fichier audio MP3");
+    } else {
+      playScreenCallChime();
+      toast.success("Sonnerie : Carillon KDS (Défaut)");
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -814,7 +872,6 @@ const KDS = () => {
     };
   }, [activeRestoId]);
 
-  // Nettoyage doneItems avec séparateur ::: compatible UUID
   useEffect(() => {
     setDoneItems(prev => {
       const activeIds = new Set(orders.filter(o => isActiveForKDS(o.status)).map(o => String(o.id)));
@@ -839,7 +896,6 @@ const KDS = () => {
     return () => clearInterval(interval);
   }, [activeRestoId]);
 
-  // Écoute de l'appairage en temps réel
   useEffect(() => {
     if (activeRestoId && adminUnlockCount < 5) return;
 
@@ -879,7 +935,6 @@ const KDS = () => {
     };
   }, [activeRestoId, adminUnlockCount, pairingCode, handlePairSuccess]);
 
-  // Déblocage audio garanti avec activation AudioContext immédiate
   const unlockAudio = () => {
     try {
       const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
@@ -887,7 +942,7 @@ const KDS = () => {
         if (!audioCtxRef.current) audioCtxRef.current = new AudioCtxClass();
         if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume();
       }
-      playScreenCallChime();
+      playConfiguredAlertSound();
     } catch {}
     setAudioEnabled(true);
     setShowAudioUnlock(false);
@@ -1247,7 +1302,6 @@ const KDS = () => {
     return orders.filter(o => isActiveForKDS(o.status) && isRealScheduledOrder(o, now) && !forcedOrderIds.has(String(o.id))).length;
   }, [orders, now, forcedOrderIds]);
 
-  // Commandes visibles sur ce poste
   const allDisplayOrders = useMemo(() => {
     const active = orders.filter(o => {
       if (!isActiveForKDS(o.status)) return false;
@@ -1314,9 +1368,9 @@ const KDS = () => {
           item, 
           hiddenOptionNames, 
           optionGroupMapping, 
-          groupOptionsInline,
-          optionGroupSortDict,
-          optionNameKdsDict,
+          groupOptionsInline, 
+          optionGroupSortDict, 
+          optionNameKdsDict, 
           productKdsDict
         );
 
@@ -1410,7 +1464,7 @@ const KDS = () => {
         groupedItems, 
         flatLines, 
         chunks, 
-        rowSpan,
+        rowSpan, 
         colSpan, 
         linesPerColumn 
       };
@@ -1420,7 +1474,7 @@ const KDS = () => {
     selectedCategories, 
     productDict, 
     productNameDict, 
-    productKdsDict,
+    productKdsDict, 
     hiddenOptionNames, 
     dbHiddenCategories, 
     availableCategories, 
@@ -1428,8 +1482,8 @@ const KDS = () => {
     groupOptionsInline, 
     forcedOrderIds, 
     now, 
-    activeLayoutMode,
-    optionGroupSortDict,
+    activeLayoutMode, 
+    optionGroupSortDict, 
     optionNameKdsDict
   ]);
 
@@ -1437,7 +1491,6 @@ const KDS = () => {
     return allDisplayOrders.filter(o => o.status?.trim().toLowerCase() === 'nouvelle');
   }, [allDisplayOrders]);
 
-  // Dépendance booléenne pour éliminer le bug du carillon répété chaque seconde
   const hasNewOrders = newOrdersAlertList.length > 0;
 
   useEffect(() => {
@@ -1602,7 +1655,7 @@ const KDS = () => {
         <div className={`absolute ${isOffline ? 'top-10' : 'top-4'} right-4 z-40 flex flex-col gap-2 max-w-sm pointer-events-auto`}>
           {newOrdersAlertList.map((newOrd) => (
             <div 
-              key={newOrd.id}
+              key={newOrd.id} 
               className="bg-red-600/95 backdrop-blur-md border border-red-400/50 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center justify-between gap-4 animate-alert"
             >
               <div className="flex items-center gap-2.5">
@@ -1629,13 +1682,13 @@ const KDS = () => {
         </div>
       )}
 
-      {/* BOUTONS FLOTTANTS LATÉRAUX COMPACTS */}
+      {/* BOUTONS FLOTTANTS LATÉRAUX */}
       {totalPages > 1 && (
         <>
           {currentPage > 1 && (
             <button 
-              type="button"
-              onClick={goToPrevPage}
+              type="button" 
+              onClick={goToPrevPage} 
               className={`absolute left-2 top-1/2 -translate-y-1/2 z-30 w-9 h-9 2xl:w-12 2xl:h-12 rounded-full flex items-center justify-center backdrop-blur-md border text-white shadow-xl transition-all active:scale-90 cursor-pointer ${
                 prevPageHasNew 
                   ? 'bg-red-600 text-white border-red-400 animate-pulse ring-2 ring-red-400' 
@@ -1649,8 +1702,8 @@ const KDS = () => {
 
           {currentPage < totalPages && (
             <button 
-              type="button"
-              onClick={goToNextPage}
+              type="button" 
+              onClick={goToNextPage} 
               className={`absolute right-2 top-1/2 -translate-y-1/2 z-30 w-9 h-9 2xl:w-12 2xl:h-12 rounded-full flex items-center justify-center backdrop-blur-md border text-white shadow-xl transition-all active:scale-90 cursor-pointer ${
                 nextPageHasNew 
                   ? 'bg-red-600 text-white border-red-400 animate-pulse ring-2 ring-red-400' 
@@ -1664,9 +1717,6 @@ const KDS = () => {
         </>
       )}
 
-      {/* =========================================================
-          CORPS PRINCIPAL : ÉCRAN D'APPAIRAGE OU GRILLE KDS
-          ========================================================= */}
       {!activeRestoId ? (
         <div className="h-screen w-screen max-h-screen max-w-screen overflow-hidden bg-black text-neutral-100 flex flex-col justify-between select-none font-sans tracking-tight">
           
@@ -1808,7 +1858,6 @@ const KDS = () => {
                   }}
                   className={`bg-slate-100 flex flex-col overflow-hidden rounded-none h-full ${cardBorderClass}`}
                 >
-                  {/* EN-TÊTE DU TICKET */}
                   <div className={`${headerBgClass} px-[0.8vw] py-[0.8vh] flex justify-between items-center border-b border-black/30 flex-shrink-0 z-10`}>
                     <div className="flex items-center gap-[0.5vw]">
                       {isNewOrder && <BellRing className="w-[1.8vh] h-[1.8vh] text-white animate-bounce" />}
@@ -1825,7 +1874,6 @@ const KDS = () => {
                     </div>
                   </div>
 
-                  {/* CONTENEUR DES ARTICLES AVEC SÉPARATEUR DE CLÉ SÉCURISÉ */}
                   <div className="flex-1 overflow-hidden bg-slate-50 p-0.5">
                     <div 
                       className="grid h-full" 
@@ -1920,7 +1968,6 @@ const KDS = () => {
                     </div>
                   </div>
 
-                  {/* BOUTON D'ACTION INFÉRIEUR */}
                   <div className="flex-shrink-0 border-t border-slate-900 z-10">
                     {isNewOrder ? (
                       <button onClick={() => acceptOrder(order.id)} className="w-full bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white font-black text-[clamp(12px,1.6vh,22px)] uppercase tracking-widest py-[1.2vh] transition-all flex justify-center items-center gap-2 rounded-none cursor-pointer">
@@ -2172,7 +2219,7 @@ const KDS = () => {
 
             <div className="p-6 space-y-6 overflow-y-auto max-h-[75vh] custom-scrollbar">
               
-              {/* SECTION ADMIN MASQUÉE (DÉVERROUILLÉE PAR 5 CLICS SUR LE TITRE) */}
+              {/* SECTION ADMIN MASQUÉE */}
               {adminUnlockCount >= 5 && (
                 <div className="border border-white/15 bg-black/60 p-5 rounded-2xl space-y-5">
                   <div className="flex items-center justify-between border-b border-white/10 pb-3">
@@ -2250,6 +2297,50 @@ const KDS = () => {
                   )}
                 </div>
               )}
+
+              {/* SECTION NOUVELLE : CHOIX DE LA SONNERIE */}
+              <div className="border-t border-white/10 pt-4">
+                <h3 className="text-sm font-black uppercase text-white mb-3 flex items-center gap-2">
+                  <BellRing size={18} className="text-amber-500"/> Sonnerie des commandes
+                </h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleChangeSoundType('chime')}
+                    className={`p-3.5 text-left border rounded-none transition-all flex flex-col justify-between cursor-pointer ${
+                      soundType === 'chime'
+                        ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-lg'
+                        : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-black text-sm uppercase">Carillon KDS (Défaut)</span>
+                      <Volume2 size={18} />
+                    </div>
+                    <p className={`text-xs ${soundType === 'chime' ? 'text-slate-900 font-semibold' : 'text-white/50'}`}>
+                      Harmonique synthétique (Web Audio API). Zéro latence réseau et fonctionne hors ligne.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleChangeSoundType('mp3')}
+                    className={`p-3.5 text-left border rounded-none transition-all flex flex-col justify-between cursor-pointer ${
+                      soundType === 'mp3'
+                        ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-lg'
+                        : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-black text-sm uppercase">Fichier MP3 (son.mp3)</span>
+                      <BellRing size={18} />
+                    </div>
+                    <p className={`text-xs ${soundType === 'mp3' ? 'text-slate-900 font-semibold' : 'text-white/50'}`}>
+                      Sonnerie personnalisée servie depuis le dossier public (/son.mp3).
+                    </p>
+                  </button>
+                </div>
+              </div>
 
               {/* DISPOSITION DE LA GRILLE */}
               <div className="border-t border-white/10 pt-4">
