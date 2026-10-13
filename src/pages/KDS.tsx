@@ -50,7 +50,7 @@ export const isRealScheduledOrder = (order: any, now: Date) => {
   return diffFromCreation > 30 && diffFromNow > SCHEDULED_THRESHOLD_MINUTES;
 };
 
-// POLICES FLUIDES ADAPTÉES AU VIEWPORT (ZÉRO PX FIXE)
+// POLICES FLUIDES ADAPTÉES AU VIEWPORT
 const PRODUCT_FONT_CONFIGS: Record<string, { label: string; textClass: string; qtyClass: string }> = {
   small: { 
     label: 'Petite', 
@@ -127,7 +127,7 @@ const parseOrderDetails = (details: any): any[] => {
   return [];
 };
 
-// EXTRACTION DES LIGNES D'OPTIONS AVEC SORT_KDS ET NAME_KDS
+// 🟢 EXTRACTION CALQUÉE SUR LA LOGIQUE ROBUSTE DE ORDERSDASHBOARDMODAL
 const extractOptionLinesForKDS = (
   item: any, 
   hiddenOptionNames: string[] = [], 
@@ -137,22 +137,12 @@ const extractOptionLinesForKDS = (
   optionNameKdsDict: Record<string, string> = {},
   productKdsDict: Record<string, string> = {}
 ) => {
-  const isHidden = (name: string) => {
-    if (!name || typeof name !== 'string') return false;
-    const normName = normalizeText(name);
-    if (!normName) return false;
-    return hiddenOptionNames.some(hidden => {
-      const normHidden = normalizeText(hidden);
-      return normHidden && (normName === normHidden || normName.replace(/^sans\s+/, '') === normHidden);
-    });
-  };
-
   const getOptionDisplayName = (opt: any): string => {
     if (!opt) return '';
     if (opt.name_kds && String(opt.name_kds).trim()) {
       return String(opt.name_kds).trim();
     }
-    const rawName = opt.name || '';
+    const rawName = typeof opt === 'string' ? opt : (opt.name || opt.option_name || '');
     const normName = normalizeText(rawName);
     const cleanNormName = normName.replace(/^sans\s+/, '');
 
@@ -172,17 +162,34 @@ const extractOptionLinesForKDS = (
   const resultRows: { items: { name: string; qty: number; isSans: boolean }[]; isSans: boolean; groupIdx: number }[] = [];
   let groupCounter = 0;
 
-  const optionGroups = getFormattedOrderOptions(item, groupMapping);
+  // 1. Récupération via le formateur officiel
+  let optionGroups = getFormattedOrderOptions(item, groupMapping);
+
+  // 2. Repli de secours si le formateur n'a rien renvoyé mais qu'il y a des options brutes
+  if ((!optionGroups || optionGroups.length === 0) && (Array.isArray(item.options) || Array.isArray(item.selectedSubOptions))) {
+    const rawList = item.options || item.selectedSubOptions || [];
+    if (rawList.length > 0) {
+      optionGroups = [{
+        groupName: 'OPTIONS',
+        originalGroupName: 'OPTIONS',
+        items: rawList.map((o: any) => ({
+          name: typeof o === 'string' ? o : (o.name || o.option_name || ''),
+          price: o.price || 0,
+          qty: o.qty || o.quantity || 1,
+          isSans: o.isSans || /^sans\s+/i.test(o.name || '')
+        }))
+      }];
+    }
+  }
 
   const sansItems: { name: string; qty: number; isSans: boolean }[] = [];
   const normalGroups: { groupName: string; sortOrder: number; items: { name: string; qty: number; isSans: boolean }[] }[] = [];
 
-  optionGroups.forEach(grp => {
-    if ((grp.originalGroupName && isHidden(grp.originalGroupName)) || (grp.groupName && isHidden(grp.groupName))) {
-      return;
-    }
+  (optionGroups || []).forEach(grp => {
+    if (!grp) return;
 
-    const validItems = (grp.items || []).filter(opt => opt && opt.name && !isHidden(opt.name));
+    // Pas de suppression agressive : on prend tous les items valides
+    const validItems = (grp.items || []).filter(opt => opt && opt.name);
     if (validItems.length === 0) return;
 
     validItems.forEach(opt => {
@@ -195,7 +202,7 @@ const extractOptionLinesForKDS = (
 
     const nonSansItems = validItems.filter(opt => !opt.isSans && grp.originalGroupName !== 'INGRÉDIENTS');
     if (nonSansItems.length > 0) {
-      const rawGroupName = grp.originalGroupName || grp.groupName || '';
+      const rawGroupName = grp.originalGroupName || grp.groupName || 'OPTIONS';
       const normGroupName = normalizeText(rawGroupName);
       const sortOrder = groupSortDict[normGroupName] ?? 999;
 
@@ -211,6 +218,7 @@ const extractOptionLinesForKDS = (
     }
   });
 
+  // Insertion des "SANS"
   if (sansItems.length > 0) {
     if (groupInline) {
       for (let i = 0; i < sansItems.length; i += 2) {
@@ -223,8 +231,10 @@ const extractOptionLinesForKDS = (
     }
   }
 
+  // Tri des groupes normaux
   normalGroups.sort((a, b) => a.sortOrder - b.sortOrder);
 
+  // Insertion des options normales
   normalGroups.forEach(grp => {
     const currentIdx = groupCounter++;
     if (groupInline) {
@@ -327,10 +337,7 @@ const OrderTimer = ({
   }
 };
 
-// ==========================================
-// ALGORITHMES DE PLACEMENT
-// ==========================================
-
+// PLACEMENTS DES CARTES
 const paginate5x1 = (orders: any[]) => {
   if (!orders || orders.length === 0) return [[]];
   const pages: any[][] = [];
@@ -666,7 +673,6 @@ const KDS = () => {
     return localStorage.getItem('kds_option_font_size') || 'normal';
   });
 
-  // CHOIX DU SON DES COMMANDES : 'chime' (Web Audio par défaut) ou 'mp3' (/son.mp3)
   const [soundType, setSoundType] = useState<'chime' | 'mp3'>(() => {
     return (localStorage.getItem('kds_sound_type') as 'chime' | 'mp3') || 'chime';
   });
@@ -716,13 +722,11 @@ const KDS = () => {
     registerScreenPairing();
   }, [pairingCode, activeRestoId, adminUnlockCount]);
 
-  // Audio refs
   const audioCtxRef = useRef<AudioContext | null>(null);
   const chimeLoopTimerRef = useRef<any>(null);
   const isLoopingSoundRef = useRef<boolean>(false);
   const mp3AudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Pré-chargement du MP3 en toute sécurité
   useEffect(() => {
     try {
       const audio = new Audio('/son.mp3');
@@ -733,7 +737,6 @@ const KDS = () => {
     }
   }, []);
 
-  // Carillon Web Audio harmonique (D5 -> A5)
   const playScreenCallChime = useCallback(() => {
     try {
       const AudioCtxClass =
@@ -781,7 +784,6 @@ const KDS = () => {
     }
   }, []);
 
-  // Lecture MP3 sécurisée
   const playMp3Sound = useCallback(() => {
     try {
       if (!mp3AudioRef.current) {
@@ -791,7 +793,7 @@ const KDS = () => {
       const playPromise = mp3AudioRef.current.play();
       if (playPromise !== undefined) {
         playPromise.catch((err) => {
-          console.warn("Lecture du son MP3 bloquée ou indisponible :", err);
+          console.warn("Lecture du son MP3 bloquée :", err);
           playScreenCallChime();
         });
       }
@@ -801,7 +803,6 @@ const KDS = () => {
     }
   }, [playScreenCallChime]);
 
-  // Déclenchement selon le son choisi
   const playConfiguredAlertSound = useCallback(() => {
     if (soundType === 'mp3') {
       playMp3Sound();
@@ -838,10 +839,10 @@ const KDS = () => {
     localStorage.setItem('kds_sound_type', type);
     if (type === 'mp3') {
       playMp3Sound();
-      toast.success("Sonnerie : Fichier audio MP3");
+      toast.success("Sonnerie : MP3 (/son.mp3)");
     } else {
       playScreenCallChime();
-      toast.success("Sonnerie : Carillon KDS (Défaut)");
+      toast.success("Sonnerie : Carillon KDS");
     }
   };
 
@@ -1302,6 +1303,7 @@ const KDS = () => {
     return orders.filter(o => isActiveForKDS(o.status) && isRealScheduledOrder(o, now) && !forcedOrderIds.has(String(o.id))).length;
   }, [orders, now, forcedOrderIds]);
 
+  // 🟢 ALL DISPLAY ORDERS SANS SUPPRESSION DE CATÉGORIES SILENCIEUSES
   const allDisplayOrders = useMemo(() => {
     const active = orders.filter(o => {
       if (!isActiveForKDS(o.status)) return false;
@@ -1338,9 +1340,9 @@ const KDS = () => {
         const mainCategory = rawCategory.toLowerCase().trim();
         const mainCategoryNorm = normalizeText(mainCategory);
 
-        if (!mainCategoryNorm) return item;
-        if (normDbHiddenCategories.includes(mainCategoryNorm)) return null;
-        if (normSelectedCats.length > 0 && !normSelectedCats.includes(mainCategoryNorm)) return null;
+        // Ne pas filtrer si la catégorie est introuvable (laisse passer la Box Étudiant)
+        if (mainCategoryNorm && normDbHiddenCategories.includes(mainCategoryNorm)) return null;
+        if (normSelectedCats.length > 0 && mainCategoryNorm && !normSelectedCats.includes(mainCategoryNorm)) return null;
 
         return { ...item };
       }).filter(Boolean);
@@ -1717,9 +1719,9 @@ const KDS = () => {
         </>
       )}
 
+      {/* CORPS PRINCIPAL */}
       {!activeRestoId ? (
         <div className="h-screen w-screen max-h-screen max-w-screen overflow-hidden bg-black text-neutral-100 flex flex-col justify-between select-none font-sans tracking-tight">
-          
           <header className="h-[9vh] min-h-[56px] px-8 lg:px-14 flex items-center justify-between border-b border-white/[0.06] shrink-0">
             <span className="text-xs lg:text-sm font-semibold tracking-[0.2em] uppercase text-neutral-400">
               Affichage Cuisine (KDS)
@@ -1986,9 +1988,8 @@ const KDS = () => {
         </div>
       )}
 
-      {/* BARRE DE CONTRÔLE DÉPLACÉE EN BAS */}
+      {/* BARRE DE CONTRÔLE */}
       <footer className="h-[6vh] min-h-[48px] px-4 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 flex items-center justify-between z-20 flex-shrink-0">
-        
         <div className="flex items-center gap-2.5 shrink-0">
           <span className="text-[clamp(12px,1.4vh,18px)] font-black tracking-widest uppercase text-slate-400">
             {selectedCategories.length > 0 || dbHiddenCategories.length > 0 ? "KDS (FILTRÉ)" : "KDS CUISINE"}
@@ -2197,7 +2198,7 @@ const KDS = () => {
         </div>
       )}
 
-      {/* MODAL PARAMÈTRES */}
+      {/* MODAL PARAMÈTRES ÉPURÉ */}
       {isSettingsOpen && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
           <div className="bg-secondary w-full max-w-3xl border border-white/10 flex flex-col rounded-none">
@@ -2217,11 +2218,11 @@ const KDS = () => {
               <button onClick={() => { setIsSettingsOpen(false); setAdminUnlockCount(0); }} className="text-white/50 hover:text-white p-1"><X size={24} /></button>
             </div>
 
-            <div className="p-6 space-y-6 overflow-y-auto max-h-[75vh] custom-scrollbar">
+            <div className="p-6 space-y-5 overflow-y-auto max-h-[75vh] custom-scrollbar">
               
               {/* SECTION ADMIN MASQUÉE */}
               {adminUnlockCount >= 5 && (
-                <div className="border border-white/15 bg-black/60 p-5 rounded-2xl space-y-5">
+                <div className="border border-white/15 bg-black/60 p-5 rounded-2xl space-y-4">
                   <div className="flex items-center justify-between border-b border-white/10 pb-3">
                     <span className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-300 flex items-center gap-2">
                       <QrCode size={16} className="text-emerald-400" /> Administration & Appairage
@@ -2231,17 +2232,14 @@ const KDS = () => {
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-center bg-black/80 p-4 rounded-xl border border-white/10">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center bg-black/80 p-4 rounded-xl border border-white/10">
                     <div className="flex flex-col items-center">
-                      <div className="bg-white p-3 rounded-xl shadow-lg">
-                        <img src={qrImageUrl} alt="QR Code KDS" className="w-36 h-36 object-contain block" />
+                      <div className="bg-white p-2.5 rounded-xl shadow-lg">
+                        <img src={qrImageUrl} alt="QR Code KDS" className="w-32 h-32 object-contain block" />
                       </div>
-                      <span className="text-[10px] text-neutral-400 uppercase font-semibold mt-2 tracking-wider">
-                        Scanner avec la PWA
-                      </span>
                     </div>
 
-                    <div className="flex flex-col items-center text-center gap-2">
+                    <div className="flex flex-col items-center text-center gap-1.5">
                       <span className="text-[11px] font-medium uppercase tracking-[0.2em] text-neutral-400">
                         Code d'association
                       </span>
@@ -2255,7 +2253,7 @@ const KDS = () => {
                     </div>
                   </div>
 
-                  <div className="pt-1">
+                  <div>
                     <label className="block text-xs font-medium text-neutral-400 uppercase tracking-wider mb-1.5">
                       Identifiant Restaurant (UUID)
                     </label>
@@ -2279,9 +2277,7 @@ const KDS = () => {
 
                   {activeRestoId && (
                     <div className="pt-2 border-t border-white/10 flex items-center justify-between">
-                      <span className="text-xs text-neutral-400">
-                        Déconnecter cet écran de l'établissement actuel :
-                      </span>
+                      <span className="text-xs text-neutral-400">Déconnexion :</span>
                       <button
                         type="button"
                         onClick={() => {
@@ -2298,102 +2294,72 @@ const KDS = () => {
                 </div>
               )}
 
-              {/* SECTION NOUVELLE : CHOIX DE LA SONNERIE */}
-              <div className="border-t border-white/10 pt-4">
-                <h3 className="text-sm font-black uppercase text-white mb-3 flex items-center gap-2">
-                  <BellRing size={18} className="text-amber-500"/> Sonnerie des commandes
+              {/* SONNERIE */}
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-wider text-white mb-2 flex items-center gap-2">
+                  <BellRing size={16} className="text-amber-500"/> Sonnerie des commandes
                 </h3>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => handleChangeSoundType('chime')}
-                    className={`p-3.5 text-left border rounded-none transition-all flex flex-col justify-between cursor-pointer ${
+                    className={`py-2 px-3 text-xs font-black uppercase border rounded-none transition-all flex items-center justify-center gap-2 cursor-pointer ${
                       soundType === 'chime'
-                        ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-lg'
+                        ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-md'
                         : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-black text-sm uppercase">Carillon KDS (Défaut)</span>
-                      <Volume2 size={18} />
-                    </div>
-                    <p className={`text-xs ${soundType === 'chime' ? 'text-slate-900 font-semibold' : 'text-white/50'}`}>
-                      Harmonique synthétique (Web Audio API). Zéro latence réseau et fonctionne hors ligne.
-                    </p>
+                    <Volume2 size={16} /> Carillon (Défaut)
                   </button>
 
                   <button
                     type="button"
                     onClick={() => handleChangeSoundType('mp3')}
-                    className={`p-3.5 text-left border rounded-none transition-all flex flex-col justify-between cursor-pointer ${
+                    className={`py-2 px-3 text-xs font-black uppercase border rounded-none transition-all flex items-center justify-center gap-2 cursor-pointer ${
                       soundType === 'mp3'
-                        ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-lg'
+                        ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-md'
                         : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-black text-sm uppercase">Fichier MP3 (son.mp3)</span>
-                      <BellRing size={18} />
-                    </div>
-                    <p className={`text-xs ${soundType === 'mp3' ? 'text-slate-900 font-semibold' : 'text-white/50'}`}>
-                      Sonnerie personnalisée servie depuis le dossier public (/son.mp3).
-                    </p>
+                    <BellRing size={16} /> Fichier MP3
                   </button>
                 </div>
               </div>
 
-              {/* DISPOSITION DE LA GRILLE */}
+              {/* DISPOSITION GRILLE */}
               <div className="border-t border-white/10 pt-4">
-                <h3 className="text-sm font-black uppercase text-white mb-3 flex items-center gap-2">
-                  <LayoutGrid size={18} className="text-amber-500"/> Disposition de la grille KDS
+                <h3 className="text-xs font-black uppercase tracking-wider text-white mb-2 flex items-center gap-2">
+                  <LayoutGrid size={16} className="text-amber-500"/> Disposition grille
                 </h3>
 
                 {isPortrait ? (
-                  <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-none flex items-center gap-3 text-amber-300">
-                    <Smartphone size={24} className="shrink-0" />
-                    <div>
-                      <div className="text-sm font-black uppercase">Mode Portrait Actif (Automatique)</div>
-                      <div className="text-xs text-white/70">
-                        L'écran est détecté en position verticale. La grille est automatiquement verrouillée en 2 colonnes x 3 rangées adaptées aux bornes et totems.
-                      </div>
-                    </div>
+                  <div className="bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-none flex items-center gap-2 text-amber-300 text-xs font-black uppercase">
+                    <Smartphone size={18} /> Mode Portrait (2×3)
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
                       onClick={() => handleChangeLayoutMode('5x1')}
-                      className={`p-3.5 text-left border rounded-none transition-all flex flex-col justify-between ${
+                      className={`py-2 px-3 border rounded-none transition-all flex items-center justify-center gap-2 font-black text-xs uppercase cursor-pointer ${
                         landscapeLayoutMode === '5x1'
-                          ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-lg'
+                          ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-md'
                           : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
                       }`}
                     >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-black text-sm uppercase">1 Ligne (5 Colonnes)</span>
-                        <Monitor size={18} />
-                      </div>
-                      <p className={`text-xs ${landscapeLayoutMode === '5x1' ? 'text-slate-900 font-semibold' : 'text-white/50'}`}>
-                        Pleine hauteur sans saut vertical. Parfait pour les commandes burger, menus complets et longs tickets.
-                      </p>
+                      <Monitor size={16} /> 1 Ligne (5 Colonnes)
                     </button>
 
                     <button
                       type="button"
                       onClick={() => handleChangeLayoutMode('5x2')}
-                      className={`p-3.5 text-left border rounded-none transition-all flex flex-col justify-between ${
+                      className={`py-2 px-3 border rounded-none transition-all flex items-center justify-center gap-2 font-black text-xs uppercase cursor-pointer ${
                         landscapeLayoutMode === '5x2'
-                          ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-lg'
+                          ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-md'
                           : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
                       }`}
                     >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-black text-sm uppercase">2 Lignes (10 Cases)</span>
-                        <LayoutGrid size={18} />
-                      </div>
-                      <p className={`text-xs ${landscapeLayoutMode === '5x2' ? 'text-slate-900 font-semibold' : 'text-white/50'}`}>
-                        Grille dense 5x2 avec anti-trou intelligent. Idéal pour voir un maximum de commandes rapides d'un coup.
-                      </p>
+                      <LayoutGrid size={16} /> 2 Lignes (10 Cases)
                     </button>
                   </div>
                 )}
@@ -2401,15 +2367,15 @@ const KDS = () => {
 
               {/* POLICE PRODUITS */}
               <div className="border-t border-white/10 pt-4">
-                <h3 className="text-sm font-black uppercase text-white mb-3 flex items-center gap-2">
-                  <Type size={18} className="text-amber-500"/> Taille police des produits
+                <h3 className="text-xs font-black uppercase tracking-wider text-white mb-2 flex items-center gap-2">
+                  <Type size={16} className="text-amber-500"/> Police produits
                 </h3>
                 <div className="grid grid-cols-4 gap-2">
                   {Object.entries(PRODUCT_FONT_CONFIGS).map(([key, cfg]) => (
                     <button
                       key={key}
                       onClick={() => handleChangeProductFontSize(key)}
-                      className={`py-2 px-2 font-black text-xs uppercase rounded-none transition-colors border ${
+                      className={`py-2 px-2 font-black text-xs uppercase rounded-none transition-colors border cursor-pointer ${
                         productFontSize === key
                           ? 'bg-amber-500 text-slate-950 border-amber-500'
                           : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
@@ -2423,15 +2389,15 @@ const KDS = () => {
 
               {/* POLICE OPTIONS */}
               <div className="border-t border-white/10 pt-4">
-                <h3 className="text-sm font-black uppercase text-white mb-3 flex items-center gap-2">
-                  <Type size={18} className="text-cyan-400"/> Taille police des options
+                <h3 className="text-xs font-black uppercase tracking-wider text-white mb-2 flex items-center gap-2">
+                  <Type size={16} className="text-cyan-400"/> Police options
                 </h3>
                 <div className="grid grid-cols-3 gap-2">
                   {Object.entries(OPTION_FONT_CONFIGS).map(([key, cfg]) => (
                     <button
                       key={key}
                       onClick={() => handleChangeOptionFontSize(key)}
-                      className={`py-2 px-2 font-black text-xs uppercase rounded-none transition-colors border ${
+                      className={`py-2 px-2 font-black text-xs uppercase rounded-none transition-colors border cursor-pointer ${
                         optionFontSize === key
                           ? 'bg-cyan-400 text-slate-900 border-cyan-400'
                           : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
@@ -2443,25 +2409,15 @@ const KDS = () => {
                 </div>
               </div>
 
-              {/* DISPOSITION GROUPÉE DES OPTIONS */}
+              {/* GROUPEMENT OPTIONS */}
               <div className="border-t border-white/10 pt-4">
-                <h3 className="text-sm font-black uppercase text-white mb-2 flex items-center gap-2">
-                  <LayoutGrid size={18} className="text-amber-500"/> Disposition des options
-                </h3>
-                <div className="flex items-center justify-between bg-white/5 p-4 border border-white/10 rounded-none">
-                  <div className="pr-4">
-                    <div className="text-sm font-bold text-white uppercase">
-                      Grouper les options d'un même groupe
-                    </div>
-                    <div className="text-xs text-white/50 mt-1">
-                      {groupOptionsInline 
-                        ? "Activé : Les options d'un même groupe s'affichent côte à côte avec police auto-adaptée." 
-                        : "Désactivé : Chaque option occupe sa propre ligne pleine largeur (lisibilité maximale)."}
-                    </div>
-                  </div>
+                <div className="flex items-center justify-between bg-white/5 px-4 py-3 border border-white/10 rounded-none">
+                  <span className="text-xs font-black uppercase text-white">
+                    Grouper les options
+                  </span>
                   <button
                     onClick={toggleGroupOptionsInline}
-                    className={`px-4 py-2 font-black text-xs uppercase rounded-none transition-colors shrink-0 ${
+                    className={`px-4 py-1.5 font-black text-xs uppercase rounded-none transition-colors cursor-pointer ${
                       groupOptionsInline 
                         ? 'bg-emerald-500 text-slate-900' 
                         : 'bg-white/10 text-white hover:bg-white/20'
@@ -2472,16 +2428,33 @@ const KDS = () => {
                 </div>
               </div>
 
-              {/* FILTRES PAR CATÉGORIE */}
+              {/* FILTRES CATÉGORIES */}
               <div className="border-t border-white/10 pt-4">
-                <div className="flex justify-between items-end mb-3">
-                  <h3 className="text-sm font-black uppercase text-white flex items-center gap-2"><Filter size={18} className="text-amber-500"/> Filtres par catégorie</h3>
-                  {selectedCategories.length > 0 && <button onClick={() => { setSelectedCategories([]); localStorage.removeItem('kds_selected_categories'); }} className="text-xs text-red-400 font-bold uppercase">Tout afficher</button>}
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-white flex items-center gap-2">
+                    <Filter size={16} className="text-amber-500"/> Filtres par catégorie
+                  </h3>
+                  {selectedCategories.length > 0 && (
+                    <button 
+                      onClick={() => { setSelectedCategories([]); localStorage.removeItem('kds_selected_categories'); }} 
+                      className="text-xs text-red-400 font-bold uppercase cursor-pointer"
+                    >
+                      Tout afficher
+                    </button>
+                  )}
                 </div>
                 
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-1.5">
                   {availableCategories.map(cat => (
-                    <button key={cat} onClick={() => toggleCategory(cat)} className={`px-3 py-1.5 text-xs font-black uppercase border rounded-none transition-colors ${selectedCategories.map(c => c.toLowerCase().trim()).includes(cat.toLowerCase().trim()) ? 'bg-amber-500 text-slate-900 border-amber-500' : 'bg-transparent text-white/70 border-white/20'}`}>
+                    <button 
+                      key={cat} 
+                      onClick={() => toggleCategory(cat)} 
+                      className={`px-3 py-1.5 text-xs font-black uppercase border rounded-none transition-colors cursor-pointer ${
+                        selectedCategories.map(c => c.toLowerCase().trim()).includes(cat.toLowerCase().trim()) 
+                          ? 'bg-amber-500 text-slate-950 border-amber-500' 
+                          : 'bg-transparent text-white/70 border-white/20 hover:border-white/40'
+                      }`}
+                    >
                       {cat}
                     </button>
                   ))}

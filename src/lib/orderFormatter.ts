@@ -31,6 +31,32 @@ const safeParseFloat = (val: unknown): number => {
   return isNaN(num) ? 0 : num;
 };
 
+// 🟢 Détection fiable du mode Solo
+export const checkIsSolo = (item: any): boolean => {
+  if (!item) return false;
+  const rawName = item.name || item.product?.name || '';
+  if (/^menu\s+/i.test(rawName)) return false;
+  if (item.isSolo === false || item.is_solo === false) return false;
+  if (item.optionsPayload?.isSolo === false || item.rawSelections?.isSolo === false) return false;
+  if (item.product?.isSolo === false || item.product?.is_solo === false) return false;
+
+  if (item.isSolo === true || item.is_solo === true) return true;
+  if (item.optionsPayload?.isSolo === true || item.rawSelections?.isSolo === true) return true;
+  if (item.product?.isSolo === true || item.product?.is_solo === true) return true;
+
+  return /\bseul\b/i.test(rawName);
+};
+
+// 🟢 Formatage propre du libellé produit
+export const formatProductName = (name: string, isSolo: boolean): string => {
+  if (!name) return '';
+  if (!isSolo) {
+    return name.replace(/\s+seul\b/i, '').trim();
+  }
+  const cleanName = name.replace(/^menu\s+/i, '').replace(/\s+seul\b/i, '').trim();
+  return `${cleanName} Seul`;
+};
+
 // 🟢 Heuristique intelligente de secours pour garantir le bon groupe en toute circonstance
 const detectCategoryHeuristic = (name: string): string | null => {
   if (!name) return null;
@@ -132,7 +158,6 @@ export const fetchOptionGroupMapping = async (
   const mapping: Record<string, string> = {};
 
   try {
-    // A. Récupération par ID de groupe explicite
     const cleanGroupIds = Array.from(explicitGroupIds).filter(id => id && !isNaN(Number(id)) && Number(id) > 0);
     if (cleanGroupIds.length > 0) {
       const { data: groupData } = await supabase
@@ -150,7 +175,6 @@ export const fetchOptionGroupMapping = async (
 
     const cleanIds = Array.from(allCandidateIds).filter(id => id && !isNaN(Number(id)));
 
-    // B. Récupération des options standards (table option_group_links)
     if (cleanIds.length > 0) {
       const { data: linksData } = await supabase
         .from('option_group_links')
@@ -182,7 +206,6 @@ export const fetchOptionGroupMapping = async (
         }
       }
 
-      // C. Récupération des produits utilisés comme options (Borne : Boissons, Accompagnements, Sauces...)
       const { data: productsData } = await supabase
         .from('product')
         .select('id, name, category, subcategory_id')
@@ -201,7 +224,6 @@ export const fetchOptionGroupMapping = async (
         });
       }
 
-      // Récupération de tous les groupes d'options actifs du restaurant
       let dynQuery = supabase
         .from('option_groups')
         .select('id, name, product_overrides, target_category_name, target_subcategory_id');
@@ -232,7 +254,6 @@ export const fetchOptionGroupMapping = async (
         });
       }
 
-      // Si un produit n'a toujours pas de groupe assigné, utiliser sa catégorie de produit directe
       cleanIds.forEach(pId => {
         if (!mapping[pId] && prodInfoMap[pId]?.category) {
           mapping[pId] = prodInfoMap[pId].category;
@@ -254,34 +275,38 @@ export const getFormattedOrderOptions = (
   item: any, 
   groupMapping: Record<string, string> = {}
 ): FormattedOptionGroup[] => {
+  const isSolo = checkIsSolo(item);
   let rawOptions: any[] = [];
 
-  if (item.boisson) {
-    rawOptions.push({
-      name: typeof item.boisson === 'string' ? item.boisson : (item.boisson.name || ''),
-      price: safeParseFloat(item.boisson.price),
-      group_name: 'BOISSONS',
-      id: item.boisson.id
-    });
-  }
-  if (item.accompagnement) {
-    rawOptions.push({
-      name: typeof item.accompagnement === 'string' ? item.accompagnement : (item.accompagnement.name || ''),
-      price: safeParseFloat(item.accompagnement.price),
-      group_name: 'ACCOMPAGNEMENTS',
-      id: item.accompagnement.id
-    });
-  }
+  // En mode Solo, on ne pousse pas les boissons et accompagnements par défaut du menu
+  if (!isSolo) {
+    if (item.boisson) {
+      rawOptions.push({
+        name: typeof item.boisson === 'string' ? item.boisson : (item.boisson.name || ''),
+        price: safeParseFloat(item.boisson.price),
+        group_name: 'BOISSONS',
+        id: item.boisson.id
+      });
+    }
+    if (item.accompagnement) {
+      rawOptions.push({
+        name: typeof item.accompagnement === 'string' ? item.accompagnement : (item.accompagnement.name || ''),
+        price: safeParseFloat(item.accompagnement.price),
+        group_name: 'ACCOMPAGNEMENTS',
+        id: item.accompagnement.id
+      });
+    }
 
-  if (Array.isArray(item.boissonSubChoices)) {
-    item.boissonSubChoices.forEach(b => {
-      if (b) rawOptions.push({ ...b, group_name: b.group_name || 'BOISSONS' });
-    });
-  }
-  if (Array.isArray(item.accompagnementSubChoices)) {
-    item.accompagnementSubChoices.forEach(a => {
-      if (a) rawOptions.push({ ...a, group_name: a.group_name || 'ACCOMPAGNEMENTS' });
-    });
+    if (Array.isArray(item.boissonSubChoices)) {
+      item.boissonSubChoices.forEach(b => {
+        if (b) rawOptions.push({ ...b, group_name: b.group_name || 'BOISSONS' });
+      });
+    }
+    if (Array.isArray(item.accompagnementSubChoices)) {
+      item.accompagnementSubChoices.forEach(a => {
+        if (a) rawOptions.push({ ...a, group_name: a.group_name || 'ACCOMPAGNEMENTS' });
+      });
+    }
   }
 
   let primaryOpts: any[] = [];
@@ -354,7 +379,6 @@ export const getFormattedOrderOptions = (
       return;
     }
 
-    // 🟢 RÉSOUDRE LE NOM DU GROUPE PAR PRIORITÉ ABSOLUE
     const strOptId = opt.id ? String(opt.id) : '';
     const cleanOptId = strOptId.replace('dyn_', '');
     const mappedByOptId = groupMapping[strOptId] || groupMapping[cleanOptId] || groupMapping[`dyn_${cleanOptId}`];
@@ -445,17 +469,23 @@ export const buildClientReceiptPayload = (params: {
     rawPayment = 'en attente';
   }
 
-  const formattedItems = items.map(item => {
+  const formattedItems = (items || []).map(item => {
+    const isSolo = checkIsSolo(item);
     const optionGroups = getFormattedOrderOptions(item, groupMapping);
     const notes = optionGroups.flatMap(grp => grp.items.map(opt => ({
       name: (opt.qty > 1 ? `${opt.qty}x ` : '') + opt.name,
       price: opt.price || 0,
       isSans: opt.isSans
     })));
+
+    // 🟢 PRIORITÉ AU NOM RÉEL DU PANIER
+    const rawName = item.name || item.product?.name || 'Produit';
+    const finalItemName = formatProductName(rawName, isSolo);
+
     return {
       qty: item.quantity || item.qty || 1,
-      name: item.product?.name || item.name || 'Produit',
-      unitPrice: item.price || item.product?.price || 0,
+      name: finalItemName,
+      unitPrice: item.price !== undefined ? item.price : (item.product?.price || 0),
       notes,
       categoryName: item.product?.category_name || item.category || ''
     };
@@ -517,17 +547,23 @@ export const buildKitchenReceiptPayload = (params: {
     groupMapping = {}
   } = params;
 
-  const formattedItems = items.map(item => {
+  const formattedItems = (items || []).map(item => {
+    const isSolo = checkIsSolo(item);
     const optionGroups = getFormattedOrderOptions(item, groupMapping);
     const notes = optionGroups.flatMap(grp => grp.items.map(opt => ({
       name: (opt.qty > 1 ? `${opt.qty}x ` : '') + opt.name,
       price: opt.price || 0,
       isSans: opt.isSans
     })));
+
+    // 🟢 PRIORITÉ AU NOM RÉEL DU PANIER
+    const rawName = item.name || item.product?.name || 'Produit';
+    const finalItemName = formatProductName(rawName, isSolo);
+
     return {
       qty: item.quantity || item.qty || 1,
-      name: item.product?.name || item.name || 'Produit',
-      unitPrice: item.price || item.product?.price || 0,
+      name: finalItemName,
+      unitPrice: item.price !== undefined ? item.price : (item.product?.price || 0),
       notes,
       categoryName: item.product?.category_name || item.category || ''
     };
