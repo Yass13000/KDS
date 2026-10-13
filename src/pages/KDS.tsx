@@ -127,11 +127,11 @@ const parseOrderDetails = (details: any): any[] => {
   return [];
 };
 
-// 🟢 EXTRACTION CALQUÉE SUR LA LOGIQUE ROBUSTE DE ORDERSDASHBOARDMODAL
+// 🟢 EXTRACTION ALIGNÉE SUR ORDERSDASHBOARDMODAL AVEC TRI ET FILTRE SHOW_ON_KDS
 const extractOptionLinesForKDS = (
   item: any, 
   hiddenOptionNames: string[] = [], 
-  groupMapping: Record<string, string> = {},
+  groupMapping: Record<string, any> = {},
   groupInline: boolean = true,
   groupSortDict: Record<string, number> = {},
   optionNameKdsDict: Record<string, string> = {},
@@ -162,16 +162,18 @@ const extractOptionLinesForKDS = (
   const resultRows: { items: { name: string; qty: number; isSans: boolean }[]; isSans: boolean; groupIdx: number }[] = [];
   let groupCounter = 0;
 
-  // 1. Récupération via le formateur officiel
+  // 1. Récupération des options via le formateur
   let optionGroups = getFormattedOrderOptions(item, groupMapping);
 
-  // 2. Repli de secours si le formateur n'a rien renvoyé mais qu'il y a des options brutes
+  // 2. Repli de sécurité si aucune option formatée n'est renvoyée mais que l'article en possède
   if ((!optionGroups || optionGroups.length === 0) && (Array.isArray(item.options) || Array.isArray(item.selectedSubOptions))) {
     const rawList = item.options || item.selectedSubOptions || [];
     if (rawList.length > 0) {
       optionGroups = [{
         groupName: 'OPTIONS',
         originalGroupName: 'OPTIONS',
+        sortOrder: 99,
+        showOnKds: true,
         items: rawList.map((o: any) => ({
           name: typeof o === 'string' ? o : (o.name || o.option_name || ''),
           price: o.price || 0,
@@ -187,8 +189,9 @@ const extractOptionLinesForKDS = (
 
   (optionGroups || []).forEach(grp => {
     if (!grp) return;
+    // 🛑 Filtrage strict : masquage des groupes explicitement configurés hors KDS
+    if (grp.showOnKds === false || grp.show_on_kds === false) return;
 
-    // Pas de suppression agressive : on prend tous les items valides
     const validItems = (grp.items || []).filter(opt => opt && opt.name);
     if (validItems.length === 0) return;
 
@@ -202,12 +205,12 @@ const extractOptionLinesForKDS = (
 
     const nonSansItems = validItems.filter(opt => !opt.isSans && grp.originalGroupName !== 'INGRÉDIENTS');
     if (nonSansItems.length > 0) {
-      const rawGroupName = grp.originalGroupName || grp.groupName || 'OPTIONS';
-      const normGroupName = normalizeText(rawGroupName);
-      const sortOrder = groupSortDict[normGroupName] ?? 999;
+      const sortOrder = typeof grp.sortOrder === 'number' 
+        ? grp.sortOrder 
+        : (groupSortDict[normalizeText(grp.groupName)] ?? 999);
 
       normalGroups.push({
-        groupName: rawGroupName,
+        groupName: grp.groupName || 'OPTIONS',
         sortOrder,
         items: nonSansItems.map(opt => ({ 
           name: getOptionDisplayName(opt), 
@@ -218,7 +221,7 @@ const extractOptionLinesForKDS = (
     }
   });
 
-  // Insertion des "SANS"
+  // Lignes "SANS"
   if (sansItems.length > 0) {
     if (groupInline) {
       for (let i = 0; i < sansItems.length; i += 2) {
@@ -231,10 +234,10 @@ const extractOptionLinesForKDS = (
     }
   }
 
-  // Tri des groupes normaux
+  // Tri strict selon sort_kds
   normalGroups.sort((a, b) => a.sortOrder - b.sortOrder);
 
-  // Insertion des options normales
+  // Groupes normaux
   normalGroups.forEach(grp => {
     const currentIdx = groupCounter++;
     if (groupInline) {
@@ -696,7 +699,7 @@ const KDS = () => {
   const [optionNameKdsDict, setOptionNameKdsDict] = useState<Record<string, string>>({});
 
   const [doneItems, setDoneItems] = useState<Record<string, boolean>>({});
-  const [optionGroupMapping, setOptionGroupMapping] = useState<Record<string, string>>({});
+  const [optionGroupMapping, setOptionGroupMapping] = useState<Record<string, any>>({});
 
   useEffect(() => {
     if (activeRestoId && adminUnlockCount < 5) return;
@@ -1303,7 +1306,7 @@ const KDS = () => {
     return orders.filter(o => isActiveForKDS(o.status) && isRealScheduledOrder(o, now) && !forcedOrderIds.has(String(o.id))).length;
   }, [orders, now, forcedOrderIds]);
 
-  // 🟢 ALL DISPLAY ORDERS SANS SUPPRESSION DE CATÉGORIES SILENCIEUSES
+  // 🟢 TOUTES LES COMMANDES SANS FILTRAGE DESTRUCTIF
   const allDisplayOrders = useMemo(() => {
     const active = orders.filter(o => {
       if (!isActiveForKDS(o.status)) return false;
@@ -1340,7 +1343,6 @@ const KDS = () => {
         const mainCategory = rawCategory.toLowerCase().trim();
         const mainCategoryNorm = normalizeText(mainCategory);
 
-        // Ne pas filtrer si la catégorie est introuvable (laisse passer la Box Étudiant)
         if (mainCategoryNorm && normDbHiddenCategories.includes(mainCategoryNorm)) return null;
         if (normSelectedCats.length > 0 && mainCategoryNorm && !normSelectedCats.includes(mainCategoryNorm)) return null;
 
@@ -1684,7 +1686,7 @@ const KDS = () => {
         </div>
       )}
 
-      {/* BOUTONS FLOTTANTS LATÉRAUX */}
+      {/* BOUTONS FLOTTANTS LATÉRAUX COMPACTS */}
       {totalPages > 1 && (
         <>
           {currentPage > 1 && (

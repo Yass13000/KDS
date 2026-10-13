@@ -2,16 +2,31 @@
 import { supabase } from '@/lib/supabaseClient';
 
 export interface FormattedOptionItem {
+  id?: string | number;
   name: string;
   price: number;
   qty: number;
   isSans: boolean;
+  step_order?: number;
+  sort_order?: number;
 }
 
 export interface FormattedOptionGroup {
+  groupId?: string | number;
   groupName: string;
   originalGroupName?: string;
+  sortOrder: number;
+  hideIfSolo: boolean;
+  showOnKds: boolean;
   items: FormattedOptionItem[];
+}
+
+export interface GroupMeta {
+  id: string | number;
+  name: string;
+  sort_kds: number;
+  hide_if_solo: boolean;
+  show_on_kds: boolean;
 }
 
 const safeParseJSON = (data: unknown): Record<string, unknown> => {
@@ -31,7 +46,7 @@ const safeParseFloat = (val: unknown): number => {
   return isNaN(num) ? 0 : num;
 };
 
-// 🟢 Détection fiable du mode Solo
+// 🟢 Détection du mode Solo
 export const checkIsSolo = (item: any): boolean => {
   if (!item) return false;
   const rawName = item.name || item.product?.name || '';
@@ -47,7 +62,7 @@ export const checkIsSolo = (item: any): boolean => {
   return /\bseul\b/i.test(rawName);
 };
 
-// 🟢 Formatage propre du libellé produit
+// 🟢 Formatage du libellé produit
 export const formatProductName = (name: string, isSolo: boolean): string => {
   if (!name) return '';
   if (!isSolo) {
@@ -57,46 +72,46 @@ export const formatProductName = (name: string, isSolo: boolean): string => {
   return `${cleanName} Seul`;
 };
 
-// 🟢 Heuristique intelligente de secours pour garantir le bon groupe en toute circonstance
-const detectCategoryHeuristic = (name: string): string | null => {
+// 🟢 Heuristique intelligente de repli pour les groupes et priorités de tri
+const detectCategoryHeuristic = (name: string): { name: string; sort_kds: number } | null => {
   if (!name) return null;
   const upper = name.toUpperCase();
 
   if (/SAVEUR|SPICY|HOT|LEMON|PEPPER|BBQ\s*DIP|SWEET|HONEY|BUFFALO|GARLIC/i.test(upper) && !/PEPSI|COCA|BOISSON/i.test(upper)) {
-    return 'SAVEURS';
+    return { name: 'SAVEURS', sort_kds: 0 };
   }
-  if (/SAUCE|MAYO|KETCHUP|RANCH|ALGERIENNE|SAMOURAI|BIGGY|ANDALOUSE|POIVRE|CURRY|CHEDDAR\s*DIP/i.test(upper)) {
-    return 'SAUCES';
+  if (/SAUCE|MAYO|KETCHUP|RANCH|ALGERIENNE|SAMOURAI|BIGGY|ANDALOUSE|POIVRE|CURRY|CHEDDAR\s*DIP|COMEBACK/i.test(upper)) {
+    return { name: 'SAUCES', sort_kds: 3 };
   }
-  if (/PEPSI|COCA|FANTA|SPRITE|OASIS|ICE\s*TEA|EAU|RED\s*BULL|7UP|TROPICO|SCHWEPPES|CAPRI|50CL|33CL|BOISSON/i.test(upper)) {
-    return 'BOISSONS';
+  if (/PEPSI|COCA|FANTA|SPRITE|OASIS|ICE\s*TEA|EAU|CRISTALINE|RED\s*BULL|7UP|TROPICO|SCHWEPPES|CAPRI|50CL|33CL|BOISSON/i.test(upper)) {
+    return { name: 'BOISSONS', sort_kds: 4 };
   }
-  if (/FRITE|POTATOES|MAÏS|MAIS|ONION\s*RING|MOZZA|NUGGET|TENDER|WINGS|ACCOMPAGNEMENT/i.test(upper)) {
-    return 'ACCOMPAGNEMENTS';
+  if (/FRITE|CRUNCHYZ|POTATOES|MAÏS|MAIS|ONION\s*RING|MOZZA|NUGGET|TENDER|WINGS|ACCOMPAGNEMENT/i.test(upper)) {
+    return { name: 'ACCOMPAGNEMENTS', sort_kds: 1 };
   }
   if (/SLIDER|BURGER|SANDWICH/i.test(upper)) {
-    return 'CHOIX PRINCIPAL';
+    return { name: 'CHOIX PRINCIPAL', sort_kds: 0 };
   }
   if (/TAILLE|FORMAT|SIMPLE|DOUBLE|TRIPLE|MENU|XL|L\b|M\b/i.test(upper)) {
-    return 'TAILLE';
+    return { name: 'TAILLE', sort_kds: 0 };
   }
   if (/DONUT|COOKIE|MUFFIN|TIRAMISU|GLACE|BROWNIE|SUNDAE|DESSERT/i.test(upper)) {
-    return 'DESSERTS';
+    return { name: 'DESSERTS', sort_kds: 5 };
   }
   if (/SUPP|SUPPLÉMENT|EXTRA/i.test(upper)) {
-    return 'SUPPLÉMENTS';
+    return { name: 'SUPPLÉMENTS', sort_kds: 2 };
   }
 
   return null;
 };
 
 /**
- * 🟢 1. MAPPING ROBUSTE DES OPTIONS DEPUIS SUPABASE (GROUPS, OPTIONS & PRODUITS BORNE/CAISSE)
+ * 🟢 1. MAPPING DES GROUPES DEPUIS SUPABASE (AVEC SHOW_ON_KDS, HIDE_IF_SOLO ET SORT_KDS)
  */
 export const fetchOptionGroupMapping = async (
   items: any[], 
   activeRestoId?: string
-): Promise<Record<string, string>> => {
+): Promise<Record<string, GroupMeta>> => {
   if (!items || items.length === 0) return {};
 
   const allCandidateIds = new Set<string>();
@@ -155,22 +170,43 @@ export const fetchOptionGroupMapping = async (
     }
   });
 
-  const mapping: Record<string, string> = {};
+  const mapping: Record<string, GroupMeta> = {};
 
   try {
-    const cleanGroupIds = Array.from(explicitGroupIds).filter(id => id && !isNaN(Number(id)) && Number(id) > 0);
-    if (cleanGroupIds.length > 0) {
-      const { data: groupData } = await supabase
-        .from('option_groups')
-        .select('id, name')
-        .in('id', cleanGroupIds);
+    let groupsQuery = supabase
+      .from('option_groups')
+      .select('id, name, hide_if_solo, show_on_kds, sort_kds, target_category_name, target_subcategory_id, product_overrides');
 
-      if (groupData) {
-        groupData.forEach((grp: any) => {
-          mapping[`grp_${grp.id}`] = grp.name;
-          mapping[String(grp.id)] = grp.name;
+    if (activeRestoId) {
+      groupsQuery = groupsQuery.or(`restaurant_id.eq.${activeRestoId},restaurant_id.is.null`);
+    }
+
+    const { data: allGroups } = await groupsQuery;
+
+    const groupByIdMap: Record<string | number, GroupMeta> = {};
+
+    if (allGroups) {
+      allGroups.forEach((grp: any) => {
+        const meta: GroupMeta = {
+          id: grp.id,
+          name: grp.name,
+          sort_kds: typeof grp.sort_kds === 'number' ? grp.sort_kds : 0,
+          hide_if_solo: grp.hide_if_solo === true,
+          show_on_kds: grp.show_on_kds !== false
+        };
+
+        groupByIdMap[grp.id] = meta;
+        groupByIdMap[String(grp.id)] = meta;
+        mapping[`grp_${grp.id}`] = meta;
+        mapping[String(grp.id)] = meta;
+
+        // Détection des overrides (produits dynamiques assignés à ce groupe)
+        const overrides = safeParseJSON(grp.product_overrides);
+        Object.keys(overrides).forEach(pId => {
+          mapping[pId] = meta;
+          mapping[`dyn_${pId}`] = meta;
         });
-      }
+      });
     }
 
     const cleanIds = Array.from(allCandidateIds).filter(id => id && !isNaN(Number(id)));
@@ -182,28 +218,14 @@ export const fetchOptionGroupMapping = async (
         .in('option_id', cleanIds);
 
       if (linksData && linksData.length > 0) {
-        const groupIds = Array.from(new Set(linksData.map(l => l.group_id).filter(Boolean)));
-        if (groupIds.length > 0) {
-          const { data: groupsData } = await supabase
-            .from('option_groups')
-            .select('id, name')
-            .in('id', groupIds);
-
-          if (groupsData) {
-            const groupNameMap: Record<string | number, string> = {};
-            groupsData.forEach(g => {
-              if (g.id && g.name) groupNameMap[g.id] = g.name;
-            });
-
-            linksData.forEach(link => {
-              if (link.option_id && link.group_id && groupNameMap[link.group_id]) {
-                const strOptId = String(link.option_id);
-                mapping[strOptId] = groupNameMap[link.group_id];
-                mapping[`dyn_${strOptId}`] = groupNameMap[link.group_id];
-              }
-            });
+        linksData.forEach(link => {
+          if (link.option_id && link.group_id && groupByIdMap[link.group_id]) {
+            const meta = groupByIdMap[link.group_id];
+            const strOptId = String(link.option_id);
+            mapping[strOptId] = meta;
+            mapping[`dyn_${strOptId}`] = meta;
           }
-        }
+        });
       }
 
       const { data: productsData } = await supabase
@@ -211,55 +233,22 @@ export const fetchOptionGroupMapping = async (
         .select('id, name, category, subcategory_id')
         .in('id', cleanIds);
 
-      const prodInfoMap: Record<string, any> = {};
-      if (productsData) {
+      if (productsData && allGroups) {
         productsData.forEach(p => {
-          if (p.id) {
-            prodInfoMap[String(p.id)] = {
-              name: p.name,
-              category: p.category ? String(p.category).trim().toUpperCase() : '',
-              subcategory_id: p.subcategory_id
-            };
+          const strPId = String(p.id);
+          if (!mapping[strPId]) {
+            const cat = p.category ? String(p.category).trim().toUpperCase() : '';
+            const matchedGroup = allGroups.find((g: any) => 
+              (g.target_category_name && String(g.target_category_name).trim().toUpperCase() === cat) ||
+              (g.target_subcategory_id && g.target_subcategory_id === p.subcategory_id)
+            );
+            if (matchedGroup && groupByIdMap[matchedGroup.id]) {
+              mapping[strPId] = groupByIdMap[matchedGroup.id];
+              mapping[`dyn_${strPId}`] = groupByIdMap[matchedGroup.id];
+            }
           }
         });
       }
-
-      let dynQuery = supabase
-        .from('option_groups')
-        .select('id, name, product_overrides, target_category_name, target_subcategory_id');
-
-      if (activeRestoId) {
-        dynQuery = dynQuery.or(`restaurant_id.eq.${activeRestoId},restaurant_id.is.null`);
-      }
-
-      const { data: allGroups } = await dynQuery;
-
-      if (allGroups) {
-        allGroups.forEach((grp: any) => {
-          mapping[`grp_${grp.id}`] = grp.name;
-          const overrides = safeParseJSON(grp.product_overrides);
-          const targetCat = grp.target_category_name ? String(grp.target_category_name).trim().toUpperCase() : null;
-
-          cleanIds.forEach(pId => {
-            const prod = prodInfoMap[pId];
-            const hasOverride = overrides[pId] || overrides[String(pId)];
-            const hasCategoryMatch = targetCat && prod?.category && prod.category === targetCat;
-            const hasSubcatMatch = grp.target_subcategory_id && prod?.subcategory_id && grp.target_subcategory_id === prod.subcategory_id;
-
-            if (hasOverride || hasCategoryMatch || hasSubcatMatch) {
-              mapping[pId] = grp.name;
-              mapping[`dyn_${pId}`] = grp.name;
-            }
-          });
-        });
-      }
-
-      cleanIds.forEach(pId => {
-        if (!mapping[pId] && prodInfoMap[pId]?.category) {
-          mapping[pId] = prodInfoMap[pId].category;
-          mapping[`dyn_${pId}`] = prodInfoMap[pId].category;
-        }
-      });
     }
   } catch (e) {
     console.error("Erreur chargement mapping option groups :", e);
@@ -269,23 +258,23 @@ export const fetchOptionGroupMapping = async (
 };
 
 /**
- * 🟢 2. FORMATEUR ET REGROUPEUR DES OPTIONS POUR L'AFFICHAGE (BORNE, CAISSE & KDS)
+ * 🟢 2. FORMATEUR ET REGROUPEUR DES OPTIONS (FILTRE SHOW_ON_KDS APPLIQUÉ, HIDE_IF_SOLO VISIBLE)
  */
 export const getFormattedOrderOptions = (
   item: any, 
-  groupMapping: Record<string, string> = {}
+  groupMapping: Record<string, any> = {}
 ): FormattedOptionGroup[] => {
   const isSolo = checkIsSolo(item);
   let rawOptions: any[] = [];
 
-  // En mode Solo, on ne pousse pas les boissons et accompagnements par défaut du menu
   if (!isSolo) {
     if (item.boisson) {
       rawOptions.push({
         name: typeof item.boisson === 'string' ? item.boisson : (item.boisson.name || ''),
         price: safeParseFloat(item.boisson.price),
         group_name: 'BOISSONS',
-        id: item.boisson.id
+        id: item.boisson.id,
+        sort_order: 99
       });
     }
     if (item.accompagnement) {
@@ -293,7 +282,8 @@ export const getFormattedOrderOptions = (
         name: typeof item.accompagnement === 'string' ? item.accompagnement : (item.accompagnement.name || ''),
         price: safeParseFloat(item.accompagnement.price),
         group_name: 'ACCOMPAGNEMENTS',
-        id: item.accompagnement.id
+        id: item.accompagnement.id,
+        sort_order: 98
       });
     }
 
@@ -311,8 +301,8 @@ export const getFormattedOrderOptions = (
 
   let primaryOpts: any[] = [];
   if (Array.isArray(item.selectedSubOptions) && item.selectedSubOptions.length > 0) primaryOpts = item.selectedSubOptions;
-  else if (Array.isArray(item.flatOptions) && item.flatOptions.length > 0) primaryOpts = item.flatOptions;
   else if (Array.isArray(item.options) && item.options.length > 0) primaryOpts = item.options;
+  else if (Array.isArray(item.flatOptions) && item.flatOptions.length > 0) primaryOpts = item.flatOptions;
   else if (Array.isArray(item.selections) && item.selections.length > 0) primaryOpts = item.selections;
   else if (Array.isArray(item.directSubOptions) && item.directSubOptions.length > 0) primaryOpts = item.directSubOptions;
 
@@ -336,14 +326,27 @@ export const getFormattedOrderOptions = (
     }
   });
 
-  const optionsByCategory = new Map<string, FormattedOptionItem[]>();
+  const optionsByGroup = new Map<string, { meta: FormattedOptionGroup; items: FormattedOptionItem[] }>();
   const processedSansNames = new Set<string>();
 
   // Ingrédients retirés (SANS ...)
   const removedIngs = item.removedIngredients || item.product?.removedIngredients || [];
   if (Array.isArray(removedIngs) && removedIngs.length > 0) {
     const catKey = 'INGRÉDIENTS';
-    if (!optionsByCategory.has(catKey)) optionsByCategory.set(catKey, []);
+    if (!optionsByGroup.has(catKey)) {
+      optionsByGroup.set(catKey, {
+        meta: {
+          groupId: 'ingredients',
+          groupName: catKey,
+          originalGroupName: catKey,
+          sortOrder: -1,
+          hideIfSolo: false,
+          showOnKds: true,
+          items: []
+        },
+        items: []
+      });
+    }
 
     removedIngs.forEach((ing: any) => {
       const ingName = typeof ing === 'string' ? ing : (ing.name || ing.ingredient_name);
@@ -353,7 +356,13 @@ export const getFormattedOrderOptions = (
         
         if (!processedSansNames.has(displayName)) {
           processedSansNames.add(displayName);
-          optionsByCategory.get(catKey)!.push({ name: displayName, price: 0, qty: 1, isSans: true });
+          optionsByGroup.get(catKey)!.items.push({ 
+            id: ing.id,
+            name: displayName, 
+            price: 0, 
+            qty: 1, 
+            isSans: true 
+          });
         }
       }
     });
@@ -363,7 +372,7 @@ export const getFormattedOrderOptions = (
     if (!opt) return;
     const rawName = typeof opt === 'string' ? opt : (opt.name || opt.option_name || opt.title || opt.value || '');
     const name = String(rawName).trim();
-    if (!name || name.toLowerCase() === 'option' || name.toLowerCase() === 'options...') return;
+    if (!name) return;
 
     const upperName = name.toUpperCase();
     const isSans = opt.groupName === 'Sans' || opt.group_name === 'Sans' || upperName.startsWith('SANS ') || !!opt.isRemoved || !!opt.isSans;
@@ -374,55 +383,109 @@ export const getFormattedOrderOptions = (
       processedSansNames.add(displayName);
 
       const catKey = 'INGRÉDIENTS';
-      if (!optionsByCategory.has(catKey)) optionsByCategory.set(catKey, []);
-      optionsByCategory.get(catKey)!.push({ name: displayName, price: 0, qty: 1, isSans: true });
+      if (!optionsByGroup.has(catKey)) {
+        optionsByGroup.set(catKey, {
+          meta: {
+            groupId: 'ingredients',
+            groupName: catKey,
+            originalGroupName: catKey,
+            sortOrder: -1,
+            hideIfSolo: false,
+            showOnKds: true,
+            items: []
+          },
+          items: []
+        });
+      }
+      optionsByGroup.get(catKey)!.items.push({ 
+        id: opt.id,
+        name: displayName, 
+        price: 0, 
+        qty: 1, 
+        isSans: true 
+      });
       return;
     }
 
+    // Résolution métadonnées du groupe
     const strOptId = opt.id ? String(opt.id) : '';
     const cleanOptId = strOptId.replace('dyn_', '');
-    const mappedByOptId = groupMapping[strOptId] || groupMapping[cleanOptId] || groupMapping[`dyn_${cleanOptId}`];
-
     const explicitGrpId = opt.option_group_id || opt.group_id || opt.groupId;
-    const mappedByGrpId = explicitGrpId ? (groupMapping[`grp_${explicitGrpId}`] || groupMapping[String(explicitGrpId)]) : null;
 
-    let candidateGroup = opt.group_name || opt.option_group_name || opt.groupName || opt.group || opt.step_name;
-    if (candidateGroup && (
-      candidateGroup.toLowerCase() === 'option' || 
-      candidateGroup.toLowerCase() === 'options' || 
-      candidateGroup.toLowerCase() === 'options...' || 
-      candidateGroup.toLowerCase() === 'choix'
-    )) {
-      candidateGroup = null;
+    const groupMeta: GroupMeta | undefined = 
+      (explicitGrpId && (groupMapping[`grp_${explicitGrpId}`] || groupMapping[String(explicitGrpId)])) ||
+      groupMapping[strOptId] ||
+      groupMapping[cleanOptId] ||
+      groupMapping[`dyn_${cleanOptId}`];
+
+    // 🛑 RÈGLE DEMANDÉE : Masquer uniquement les groupes d'options ayant show_on_kds === false
+    const isShowOnKds = (groupMeta?.show_on_kds !== false) && (opt.show_on_kds !== false);
+    if (!isShowOnKds) {
+      return;
     }
 
-    const fallbackType = opt.type && opt.type.toLowerCase() !== 'option' && opt.type.toLowerCase() !== 'options' ? opt.type : null;
-    const heuristicGroup = detectCategoryHeuristic(displayName);
+    let resolvedGroupName = groupMeta?.name || opt.group_name || opt.option_group_name || opt.groupName;
+    let resolvedSortKds = groupMeta?.sort_kds;
 
-    const finalGroupName = mappedByGrpId || mappedByOptId || candidateGroup || fallbackType || heuristicGroup || 'OPTIONS';
-    const cleanCategoryKey = String(finalGroupName).trim().toUpperCase();
+    if (!resolvedGroupName) {
+      const heuristic = detectCategoryHeuristic(displayName);
+      if (heuristic) {
+        resolvedGroupName = heuristic.name;
+        if (resolvedSortKds === undefined) resolvedSortKds = heuristic.sort_kds;
+      }
+    }
+
+    const finalGroupName = resolvedGroupName ? String(resolvedGroupName).trim().toUpperCase() : 'CHOIX';
+    const finalSortKds = resolvedSortKds !== undefined 
+      ? resolvedSortKds 
+      : (opt.step_order !== undefined ? Number(opt.step_order) : 99);
+
+    const groupKey = `${finalGroupName}_${finalSortKds}`;
+
+    if (!optionsByGroup.has(groupKey)) {
+      optionsByGroup.set(groupKey, {
+        meta: {
+          groupId: groupMeta?.id || explicitGrpId || finalGroupName,
+          groupName: finalGroupName,
+          originalGroupName: finalGroupName,
+          sortOrder: finalSortKds,
+          hideIfSolo: groupMeta?.hide_if_solo === true,
+          showOnKds: true,
+          items: []
+        },
+        items: []
+      });
+    }
+
+    const groupEntry = optionsByGroup.get(groupKey)!;
     const price = typeof opt === 'string' ? 0 : safeParseFloat(opt.price);
-
-    if (!optionsByCategory.has(cleanCategoryKey)) {
-      optionsByCategory.set(cleanCategoryKey, []);
-    }
-
-    const list = optionsByCategory.get(cleanCategoryKey)!;
-    const existing = list.find(o => o.name.toUpperCase() === displayName && !o.isSans);
+    const existing = groupEntry.items.find(o => o.name.toUpperCase() === displayName && !o.isSans);
 
     if (existing) {
       existing.qty += 1;
       existing.price += price;
     } else {
-      list.push({ name: displayName, price: price, qty: 1, isSans: false });
+      groupEntry.items.push({ 
+        id: opt.id,
+        name: displayName, 
+        price: price, 
+        qty: 1, 
+        isSans: false,
+        step_order: opt.step_order,
+        sort_order: opt.sort_order
+      });
     }
   });
 
-  return Array.from(optionsByCategory.entries()).map(([groupKey, items]) => ({
-    groupName: '',
-    originalGroupName: groupKey,
-    items
-  }));
+  // Tri automatique des groupes selon sort_kds
+  const result = Array.from(optionsByGroup.values())
+    .map(entry => ({
+      ...entry.meta,
+      items: entry.items
+    }))
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  return result;
 };
 
 /**
@@ -439,7 +502,7 @@ export const buildClientReceiptPayload = (params: {
   deliveryFee?: number;
   finalTotal: number;
   clientInfo?: any;
-  groupMapping?: Record<string, string>;
+  groupMapping?: Record<string, any>;
   orderDate?: string;
 }) => {
   const {
@@ -475,10 +538,10 @@ export const buildClientReceiptPayload = (params: {
     const notes = optionGroups.flatMap(grp => grp.items.map(opt => ({
       name: (opt.qty > 1 ? `${opt.qty}x ` : '') + opt.name,
       price: opt.price || 0,
-      isSans: opt.isSans
+      isSans: opt.isSans,
+      groupName: grp.groupName
     })));
 
-    // 🟢 PRIORITÉ AU NOM RÉEL DU PANIER
     const rawName = item.name || item.product?.name || 'Produit';
     const finalItemName = formatProductName(rawName, isSolo);
 
@@ -533,7 +596,7 @@ export const buildKitchenReceiptPayload = (params: {
   isPaid?: boolean;
   orderDate?: string;
   items?: any[];
-  groupMapping?: Record<string, string>;
+  groupMapping?: Record<string, any>;
 }) => {
   const {
     orderId = '',
@@ -553,10 +616,10 @@ export const buildKitchenReceiptPayload = (params: {
     const notes = optionGroups.flatMap(grp => grp.items.map(opt => ({
       name: (opt.qty > 1 ? `${opt.qty}x ` : '') + opt.name,
       price: opt.price || 0,
-      isSans: opt.isSans
+      isSans: opt.isSans,
+      groupName: grp.groupName
     })));
 
-    // 🟢 PRIORITÉ AU NOM RÉEL DU PANIER
     const rawName = item.name || item.product?.name || 'Produit';
     const finalItemName = formatProductName(rawName, isSolo);
 
@@ -592,7 +655,7 @@ export const buildKitchenReceiptPayload = (params: {
  */
 export const buildReceiptPayloadFromOrder = async (
   order: any,
-  optionGroupMapping: Record<string, string> = {},
+  optionGroupMapping: Record<string, any> = {},
   prefixOrderType: string = ''
 ) => {
   if (!order) return null;
