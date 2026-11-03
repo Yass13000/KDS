@@ -25,7 +25,8 @@ import {
   Monitor, 
   QrCode, 
   KeyRound, 
-  Unlink 
+  Unlink,
+  Hourglass
 } from 'lucide-react';
 import { getFormattedOrderOptions, fetchOptionGroupMapping } from '@/lib/orderFormatter';
 import { ScheduledOrdersModal } from '@/components/ScheduledOrdersModal';
@@ -97,9 +98,10 @@ const OPTION_FONT_CONFIGS: Record<string, { label: string; single: string; doubl
 
 const chunkArrayByLines = (arr: any[], linesPerCol: number) => {
   if (arr.length === 0) return [];
+  const safeLines = Math.max(1, linesPerCol);
   const chunks = [];
-  for (let i = 0; i < arr.length; i += linesPerCol) {
-    chunks.push(arr.slice(i, i + linesPerCol));
+  for (let i = 0; i < arr.length; i += safeLines) {
+    chunks.push(arr.slice(i, i + safeLines));
   }
   return chunks;
 };
@@ -125,6 +127,15 @@ const parseOrderDetails = (details: any): any[] => {
     } catch { return []; }
   }
   return [];
+};
+
+const generateRandomPairingCode = () => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
 };
 
 // 🟢 EXTRACTION ALIGNÉE SUR ORDERSDASHBOARDMODAL AVEC TRI ET FILTRE SHOW_ON_KDS
@@ -162,10 +173,8 @@ const extractOptionLinesForKDS = (
   const resultRows: { items: { name: string; qty: number; isSans: boolean }[]; isSans: boolean; groupIdx: number }[] = [];
   let groupCounter = 0;
 
-  // 1. Récupération des options via le formateur
   let optionGroups = getFormattedOrderOptions(item, groupMapping);
 
-  // 2. Repli de sécurité si aucune option formatée n'est renvoyée mais que l'article en possède
   if ((!optionGroups || optionGroups.length === 0) && (Array.isArray(item.options) || Array.isArray(item.selectedSubOptions))) {
     const rawList = item.options || item.selectedSubOptions || [];
     if (rawList.length > 0) {
@@ -189,8 +198,16 @@ const extractOptionLinesForKDS = (
 
   (optionGroups || []).forEach(grp => {
     if (!grp) return;
-    // 🛑 Filtrage strict : masquage des groupes explicitement configurés hors KDS
     if (grp.showOnKds === false || grp.show_on_kds === false) return;
+
+    const grpNameLower = (grp.groupName || '').toLowerCase().trim();
+    const origGrpNameLower = (grp.originalGroupName || '').toLowerCase().trim();
+    if (
+      hiddenOptionNames.length > 0 &&
+      (hiddenOptionNames.includes(grpNameLower) || hiddenOptionNames.includes(origGrpNameLower))
+    ) {
+      return;
+    }
 
     const validItems = (grp.items || []).filter(opt => opt && opt.name);
     if (validItems.length === 0) return;
@@ -221,7 +238,6 @@ const extractOptionLinesForKDS = (
     }
   });
 
-  // Lignes "SANS"
   if (sansItems.length > 0) {
     if (groupInline) {
       for (let i = 0; i < sansItems.length; i += 2) {
@@ -234,10 +250,8 @@ const extractOptionLinesForKDS = (
     }
   }
 
-  // Tri strict selon sort_kds
   normalGroups.sort((a, b) => a.sortOrder - b.sortOrder);
 
-  // Groupes normaux
   normalGroups.forEach(grp => {
     const currentIdx = groupCounter++;
     if (groupInline) {
@@ -262,8 +276,8 @@ const isActiveForKDS = (status: string) => {
   return true; 
 };
 
-const HeaderClock = () => {
-  const [time, setTime] = useState(new Date());
+const HeaderClock = React.memo(() => {
+  const [time, setTime] = useState(() => new Date());
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -274,18 +288,21 @@ const HeaderClock = () => {
       {time.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
     </div>
   );
-};
+});
 
-const OrderTimer = ({ 
+// 🟢 COMPOSANT TIMER AVEC DOUBLE MODE : 'countdown' (15:00 -> 00:00) OU 'elapsed' (00:00 -> +)
+const OrderTimer = React.memo(({ 
   createdAt, 
   now, 
   scheduledTime, 
-  targetPrepMinutes = 15 
+  targetPrepMinutes = 15,
+  timerMode = 'countdown'
 }: { 
   createdAt: string; 
   now: Date; 
   scheduledTime?: string; 
   targetPrepMinutes?: number;
+  timerMode?: 'countdown' | 'elapsed';
 }) => {
   const created = new Date(createdAt).getTime();
   const schedTime = scheduledTime ? new Date(scheduledTime).getTime() : null;
@@ -310,6 +327,31 @@ const OrderTimer = ({
 
   const elapsedSeconds = Math.max(0, Math.floor((now.getTime() - created) / 1000));
   const targetSeconds = (targetPrepMinutes || 15) * 60;
+
+  // MODE 1 : TEMPS ÉCOULÉ (Démarre à 00:00 et monte)
+  if (timerMode === 'elapsed') {
+    const mins = Math.floor(elapsedSeconds / 60);
+    const secs = elapsedSeconds % 60;
+    const text = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+
+    const isOvertime = elapsedSeconds >= targetSeconds;
+    const isWarning = !isOvertime && elapsedSeconds >= Math.max(targetSeconds - 3 * 60, targetSeconds * 0.75);
+
+    let timeColorClass = 'bg-black/20 text-white border-transparent';
+    if (isOvertime) {
+      timeColorClass = 'bg-red-600 text-white animate-pulse border-red-400';
+    } else if (isWarning) {
+      timeColorClass = 'bg-orange-500 text-white border-transparent';
+    }
+
+    return (
+      <div className={`flex items-center gap-1 px-[0.6vw] py-[0.3vh] rounded-none border font-black text-[clamp(11px,1.3vh,18px)] tracking-wider transition-all ${timeColorClass}`}>
+        <Timer className="w-[1.5vh] h-[1.5vh]" /> {text}
+      </div>
+    );
+  }
+
+  // MODE 2 : DÉCOMPTE (Démarre à 15:00 et descend vers 00:00)
   const remainingSeconds = targetSeconds - elapsedSeconds;
 
   if (remainingSeconds >= 0) {
@@ -338,7 +380,7 @@ const OrderTimer = ({
       </div>
     );
   }
-};
+});
 
 // PLACEMENTS DES CARTES
 const paginate5x1 = (orders: any[]) => {
@@ -551,12 +593,14 @@ const paginatePortrait = (orders: any[]) => {
 };
 
 const KDS = () => {
-  const [now, setNow] = useState(new Date());
+  const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  const minuteTick = Math.floor(now.getTime() / 30000);
 
   const [orders, setOrders] = useState<any[]>([]);
   const [, setMissingIdError] = useState(false);
@@ -575,15 +619,6 @@ const KDS = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isScheduledModalOpen, setIsScheduledModalOpen] = useState(false);
-  
-  const generateRandomPairingCode = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let code = '';
-    for (let i = 0; i < 6; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return code;
-  };
 
   const [pairingCode, setPairingCode] = useState<string>(() => generateRandomPairingCode());
   const [deviceId] = useState<string>(() => {
@@ -598,6 +633,42 @@ const KDS = () => {
   const [isUnlinkModalOpen, setIsUnlinkModalOpen] = useState(false);
   const [unlinkPin, setUnlinkPin] = useState('');
   const [unlinkError, setUnlinkError] = useState('');
+
+  const [forcedOrderIds, setForcedOrderIds] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState<number>(1);
+
+  const [isPortrait, setIsPortrait] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerHeight > window.innerWidth;
+    }
+    return false;
+  });
+
+  const [landscapeLayoutMode, setLandscapeLayoutMode] = useState<'5x1' | '5x2'>(() => {
+    return (localStorage.getItem('kds_layout_mode') as '5x1' | '5x2') || '5x1';
+  });
+
+  // 🟢 MODE DU CHRONOMÈTRE : 'countdown' (15:00 -> 00:00) ou 'elapsed' (00:00 -> +)
+  const [timerMode, setTimerMode] = useState<'countdown' | 'elapsed'>(() => {
+    return (localStorage.getItem('kds_timer_mode') as 'countdown' | 'elapsed') || 'countdown';
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsPortrait(window.innerHeight > window.innerWidth);
+    };
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+    };
+  }, []);
+
+  const activeLayoutMode = isPortrait ? 'portrait' : landscapeLayoutMode;
+
+  const [tempRestoId, setTempRestoId] = useState(activeRestoId);
+  const [adminUnlockCount, setAdminUnlockCount] = useState(0);
 
   const handlePairSuccess = useCallback((restoId: string) => {
     if (!restoId) return;
@@ -633,37 +704,6 @@ const KDS = () => {
     }
   };
 
-  const [forcedOrderIds, setForcedOrderIds] = useState<Set<string>>(new Set());
-  const [currentPage, setCurrentPage] = useState<number>(1);
-
-  const [isPortrait, setIsPortrait] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      return window.innerHeight > window.innerWidth;
-    }
-    return false;
-  });
-
-  const [landscapeLayoutMode, setLandscapeLayoutMode] = useState<'5x1' | '5x2'>(() => {
-    return (localStorage.getItem('kds_layout_mode') as '5x1' | '5x2') || '5x1';
-  });
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsPortrait(window.innerHeight > window.innerWidth);
-    };
-    window.addEventListener('resize', handleResize);
-    window.addEventListener('orientationchange', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      window.removeEventListener('orientationchange', handleResize);
-    };
-  }, []);
-
-  const activeLayoutMode = isPortrait ? 'portrait' : landscapeLayoutMode;
-
-  const [tempRestoId, setTempRestoId] = useState(activeRestoId);
-  const [adminUnlockCount, setAdminUnlockCount] = useState(0);
-
   const [groupOptionsInline, setGroupOptionsInline] = useState<boolean>(() => {
     return localStorage.getItem('kds_group_options_inline') !== 'false';
   });
@@ -690,9 +730,14 @@ const KDS = () => {
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const [dbHiddenCategories, setDbHiddenCategories] = useState<string[]>([]);
 
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(
-    JSON.parse(localStorage.getItem('kds_selected_categories') || '[]')
-  );
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('kds_selected_categories');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   
   const [hiddenOptionNames, setHiddenOptionNames] = useState<string[]>([]);
   const [optionGroupSortDict, setOptionGroupSortDict] = useState<Record<string, number>>({});
@@ -849,6 +894,195 @@ const KDS = () => {
     }
   };
 
+  const handleChangeTimerMode = (mode: 'countdown' | 'elapsed') => {
+    setTimerMode(mode);
+    localStorage.setItem('kds_timer_mode', mode);
+    toast.success(
+      mode === 'countdown' 
+        ? `Mode Décompte (${targetPrepMinutes}:00 → 00:00)` 
+        : "Mode Temps écoulé (00:00 → +)"
+    );
+  };
+
+  const fetchTheme = useCallback(async () => {
+    if (!activeRestoId) return;
+    try {
+      const { data, error } = await supabase
+        .from('restaurants')
+        .select('theme_primary, theme_secondary, prep_time_dine_in')
+        .eq('id', activeRestoId)
+        .single();
+        
+      if (data && !error) {
+        setThemeColors({
+          primary: data.theme_primary || '#FBBF24',
+          secondary: data.theme_secondary || '#1e293b'
+        });
+        if (data.prep_time_dine_in !== undefined && data.prep_time_dine_in !== null) {
+          setTargetPrepMinutes(Number(data.prep_time_dine_in) || 15);
+        }
+      }
+    } catch (e) {
+      console.error("Erreur chargement thème/prep_time", e);
+    }
+  }, [activeRestoId]);
+
+  const fetchCatalog = useCallback(async () => {
+    if (!activeRestoId) return;
+    try {
+      const { data: catData } = await supabase
+        .from('categories')
+        .select('name, show_on_kds')
+        .eq('restaurant_id', activeRestoId);
+
+      const hiddenCats: string[] = [];
+      if (catData) {
+        catData.forEach(c => {
+          if (c.show_on_kds === false && c.name) {
+            hiddenCats.push(c.name.toLowerCase().trim());
+          }
+        });
+      }
+      setDbHiddenCategories(hiddenCats);
+
+      const { data } = await supabase
+        .from('product')
+        .select('id, name, name_kds, category')
+        .eq('restaurant_id', activeRestoId);
+
+      if (data) {
+        const dict: Record<string, string> = {};
+        const nameDict: Record<string, string> = {};
+        const kdsDict: Record<string, string> = {};
+        const cats = new Set<string>();
+
+        data.forEach(p => {
+          const strId = p.id?.toString();
+          const rawName = p.name ? p.name.trim() : '';
+          const normName = rawName.toLowerCase();
+          const normalizedClean = normalizeText(rawName);
+
+          if (strId) dict[strId] = p.category;
+          if (normName) nameDict[normName] = p.category;
+          if (p.category) cats.add(p.category);
+
+          if (p.name_kds && String(p.name_kds).trim()) {
+            const cleanKds = String(p.name_kds).trim();
+            if (strId) kdsDict[strId] = cleanKds;
+            if (normName) kdsDict[normName] = cleanKds;
+            if (normalizedClean) kdsDict[normalizedClean] = cleanKds;
+          }
+        });
+
+        setProductDict(dict);
+        setProductNameDict(nameDict);
+        setProductKdsDict(kdsDict);
+        setAvailableCategories(Array.from(cats).sort());
+      }
+    } catch (e) { console.error("Erreur chargement catalogue", e); }
+  }, [activeRestoId]);
+
+  const fetchKdsOptionsMetadata = useCallback(async () => {
+    if (!activeRestoId) return;
+    try {
+      const { data: groups } = await supabase
+        .from('option_groups')
+        .select('id, name, sort_kds, show_on_kds, product_overrides, target_category_name, target_subcategory_id')
+        .eq('restaurant_id', activeRestoId);
+
+      if (!groups) return;
+
+      const namesToHide = new Set<string>();
+      const groupIds: number[] = [];
+      const sortDict: Record<string, number> = {};
+
+      groups.forEach(g => {
+        if (g.id) groupIds.push(g.id);
+
+        if (g.name) {
+          const normName = normalizeText(g.name);
+          sortDict[normName] = typeof g.sort_kds === 'number' ? g.sort_kds : 0;
+          if (g.show_on_kds === false) {
+            namesToHide.add(g.name.toLowerCase().trim());
+          }
+        }
+      });
+
+      setOptionGroupSortDict(sortDict);
+
+      const kdsNameDict: Record<string, string> = {};
+
+      if (groupIds.length > 0) {
+        const { data: links } = await supabase
+          .from('option_group_links')
+          .select('option_id')
+          .in('group_id', groupIds);
+
+        const optionIds = links ? links.map(l => l.option_id).filter(Boolean) : [];
+
+        if (optionIds.length > 0) {
+          const { data: options } = await supabase
+            .from('options')
+            .select('id, name, name_kds')
+            .in('id', optionIds);
+
+          if (options) {
+            options.forEach(o => {
+              if (o.name && o.name_kds && String(o.name_kds).trim()) {
+                kdsNameDict[normalizeText(o.name)] = String(o.name_kds).trim();
+              }
+            });
+          }
+        }
+      }
+
+      try {
+        const { data: directOpts } = await supabase
+          .from('options')
+          .select('name, name_kds')
+          .eq('restaurant_id', activeRestoId);
+
+        if (directOpts) {
+          directOpts.forEach(o => {
+            if (o.name && o.name_kds && String(o.name_kds).trim()) {
+              kdsNameDict[normalizeText(o.name)] = String(o.name_kds).trim();
+            }
+          });
+        }
+      } catch {}
+
+      setOptionNameKdsDict(kdsNameDict);
+      setHiddenOptionNames(Array.from(namesToHide));
+    } catch (e) { 
+      console.error("Erreur lors de la récupération des métadonnées KDS", e); 
+    }
+  }, [activeRestoId]);
+
+  const fetchOrders = useCallback(async () => {
+    if (!activeRestoId) {
+      setMissingIdError(true);
+      setIsLoading(false);
+      return;
+    }
+    setMissingIdError(false);
+    try {
+      const past24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const { data, error } = await supabase
+        .from('orders')
+        .select('id, status, created_at, scheduled_time, order_number, order_type_id, order_details, customer_name, customer_phone, actual_prep_time_seconds, prepared_at') 
+        .eq('restaurant_id', activeRestoId)
+        .gte('created_at', past24Hours.toISOString())
+        .order('created_at', { ascending: true });
+        
+      if (error) throw error;
+      if (data) setOrders(data);
+    } catch {
+      toast.error("Erreur de connexion avec la base de données");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [activeRestoId]);
+
   useEffect(() => {
     let isMounted = true;
     const loadMapping = async () => {
@@ -874,7 +1108,7 @@ const KDS = () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [activeRestoId]);
+  }, [fetchOrders]);
 
   useEffect(() => {
     setDoneItems(prev => {
@@ -898,7 +1132,7 @@ const KDS = () => {
       fetchOrders();
     }, 3 * 60 * 1000); 
     return () => clearInterval(interval);
-  }, [activeRestoId]);
+  }, [fetchOrders]);
 
   useEffect(() => {
     if (activeRestoId && adminUnlockCount < 5) return;
@@ -998,185 +1232,6 @@ const KDS = () => {
     toast.success(mode === '5x1' ? "Mode 5 Colonnes (1 Ligne) activé" : "Mode 10 Cases (2 Lignes) activé");
   };
 
-  const fetchTheme = async () => {
-    if (!activeRestoId) return;
-    try {
-      const { data, error } = await supabase
-        .from('restaurants')
-        .select('theme_primary, theme_secondary, prep_time_dine_in')
-        .eq('id', activeRestoId)
-        .single();
-        
-      if (data && !error) {
-        setThemeColors({
-          primary: data.theme_primary || '#FBBF24',
-          secondary: data.theme_secondary || '#1e293b'
-        });
-        if (data.prep_time_dine_in !== undefined && data.prep_time_dine_in !== null) {
-          setTargetPrepMinutes(Number(data.prep_time_dine_in) || 15);
-        }
-      }
-    } catch (e) {
-      console.error("Erreur chargement thème/prep_time", e);
-    }
-  };
-
-  const fetchCatalog = async () => {
-    if (!activeRestoId) return;
-    try {
-      const { data: catData } = await supabase
-        .from('categories')
-        .select('name, show_on_kds')
-        .eq('restaurant_id', activeRestoId);
-
-      const hiddenCats: string[] = [];
-      if (catData) {
-        catData.forEach(c => {
-          if (c.show_on_kds === false && c.name) {
-            hiddenCats.push(c.name.toLowerCase().trim());
-          }
-        });
-      }
-      setDbHiddenCategories(hiddenCats);
-
-      const { data } = await supabase
-        .from('product')
-        .select('id, name, name_kds, category')
-        .eq('restaurant_id', activeRestoId);
-
-      if (data) {
-        const dict: Record<string, string> = {};
-        const nameDict: Record<string, string> = {};
-        const kdsDict: Record<string, string> = {};
-        const cats = new Set<string>();
-
-        data.forEach(p => {
-          const strId = p.id?.toString();
-          const rawName = p.name ? p.name.trim() : '';
-          const normName = rawName.toLowerCase();
-          const normalizedClean = normalizeText(rawName);
-
-          if (strId) dict[strId] = p.category;
-          if (normName) nameDict[normName] = p.category;
-          if (p.category) cats.add(p.category);
-
-          if (p.name_kds && String(p.name_kds).trim()) {
-            const cleanKds = String(p.name_kds).trim();
-            if (strId) kdsDict[strId] = cleanKds;
-            if (normName) kdsDict[normName] = cleanKds;
-            if (normalizedClean) kdsDict[normalizedClean] = cleanKds;
-          }
-        });
-
-        setProductDict(dict);
-        setProductNameDict(nameDict);
-        setProductKdsDict(kdsDict);
-        setAvailableCategories(Array.from(cats).sort());
-      }
-    } catch (e) { console.error("Erreur chargement catalogue", e); }
-  };
-
-  const fetchKdsOptionsMetadata = async () => {
-    if (!activeRestoId) return;
-    try {
-      const { data: groups } = await supabase
-        .from('option_groups')
-        .select('id, name, sort_kds, show_on_kds, product_overrides, target_category_name, target_subcategory_id')
-        .eq('restaurant_id', activeRestoId);
-
-      if (!groups) return;
-
-      const namesToHide = new Set<string>();
-      const groupIds: number[] = [];
-      const sortDict: Record<string, number> = {};
-
-      groups.forEach(g => {
-        if (g.id) groupIds.push(g.id);
-
-        if (g.name) {
-          const normName = normalizeText(g.name);
-          sortDict[normName] = typeof g.sort_kds === 'number' ? g.sort_kds : 0;
-          if (g.show_on_kds === false) {
-            namesToHide.add(g.name.toLowerCase().trim());
-          }
-        }
-      });
-
-      setOptionGroupSortDict(sortDict);
-
-      const kdsNameDict: Record<string, string> = {};
-
-      if (groupIds.length > 0) {
-        const { data: links } = await supabase
-          .from('option_group_links')
-          .select('option_id')
-          .in('group_id', groupIds);
-
-        const optionIds = links ? links.map(l => l.option_id).filter(Boolean) : [];
-
-        if (optionIds.length > 0) {
-          const { data: options } = await supabase
-            .from('options')
-            .select('id, name, name_kds')
-            .in('id', optionIds);
-
-          if (options) {
-            options.forEach(o => {
-              if (o.name && o.name_kds && String(o.name_kds).trim()) {
-                kdsNameDict[normalizeText(o.name)] = String(o.name_kds).trim();
-              }
-            });
-          }
-        }
-      }
-
-      try {
-        const { data: directOpts } = await supabase
-          .from('options')
-          .select('name, name_kds')
-          .eq('restaurant_id', activeRestoId);
-
-        if (directOpts) {
-          directOpts.forEach(o => {
-            if (o.name && o.name_kds && String(o.name_kds).trim()) {
-              kdsNameDict[normalizeText(o.name)] = String(o.name_kds).trim();
-            }
-          });
-        }
-      } catch {}
-
-      setOptionNameKdsDict(kdsNameDict);
-      setHiddenOptionNames(Array.from(namesToHide));
-    } catch (e) { 
-      console.error("Erreur lors de la récupération des métadonnées KDS", e); 
-    }
-  };
-
-  const fetchOrders = async () => {
-    if (!activeRestoId) {
-      setMissingIdError(true);
-      setIsLoading(false);
-      return;
-    }
-    setMissingIdError(false);
-    try {
-      const past24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const { data, error } = await supabase
-        .from('orders')
-        .select('id, status, created_at, scheduled_time, order_number, order_type_id, order_details, customer_name, customer_phone') 
-        .eq('restaurant_id', activeRestoId)
-        .gte('created_at', past24Hours.toISOString())
-        .order('created_at', { ascending: true });
-        
-      if (error) throw error;
-      if (data) setOrders(data);
-    } catch {
-      toast.error("Erreur de connexion avec la base de données");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   useEffect(() => {
     fetchOrders();
     fetchCatalog();
@@ -1188,8 +1243,8 @@ const KDS = () => {
       .channel(`kds_orders_${activeRestoId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `restaurant_id=eq.${activeRestoId}` }, (payload) => {
         if (payload.eventType === 'DELETE') {
-           setOrders(prev => prev.filter(o => String(o.id) !== String(payload.old.id)));
-           return;
+          setOrders(prev => prev.filter(o => String(o.id) !== String(payload.old.id)));
+          return;
         }
         fetchOrders();
       })
@@ -1231,7 +1286,7 @@ const KDS = () => {
       supabase.removeChannel(productsChannel);
       supabase.removeChannel(categoriesChannel);
     };
-  }, [activeRestoId, stopLoopingSound]);
+  }, [activeRestoId, fetchOrders, fetchCatalog, fetchKdsOptionsMetadata, fetchTheme, stopLoopingSound]);
 
   const acceptOrder = async (orderId: string | number) => {
     try {
@@ -1242,18 +1297,66 @@ const KDS = () => {
     } catch { toast.error("Erreur lors de l'acceptation"); }
   };
 
+  // 🟢 VALIDATION COMMANDE + ENREGISTREMENT DU TEMPS DE PRÉPARATION (actual_prep_time_seconds & prepared_at)
   const markOrderAsReady = async (orderId: string | number) => {
     try {
-      const { error } = await supabase.from('orders').update({ status: 'Prêt' }).eq('id', orderId);
+      const targetOrder = orders.find(o => String(o.id) === String(orderId));
+      let prepSeconds: number | null = null;
+      const readyTimestamp = new Date().toISOString();
+
+      if (targetOrder?.created_at) {
+        const createdMs = new Date(targetOrder.created_at).getTime();
+        if (!isNaN(createdMs)) {
+          prepSeconds = Math.max(0, Math.floor((Date.now() - createdMs) / 1000));
+        }
+      }
+
+      const updatePayload: Record<string, any> = { 
+        status: 'Prêt',
+        prepared_at: readyTimestamp
+      };
+
+      if (prepSeconds !== null) {
+        updatePayload.actual_prep_time_seconds = prepSeconds;
+      }
+
+      const { error } = await supabase
+        .from('orders')
+        .update(updatePayload)
+        .eq('id', orderId);
+
       if (error) throw error;
-      setOrders(prev => prev.map(o => String(o.id) === String(orderId) ? { ...o, status: 'Prêt' } : o));
-      toast.success("Commande prête !");
-    } catch { toast.error("Erreur lors de la validation"); }
+
+      setOrders(prev => prev.map(o => String(o.id) === String(orderId) ? { 
+        ...o, 
+        status: 'Prêt',
+        actual_prep_time_seconds: prepSeconds,
+        prepared_at: readyTimestamp
+      } : o));
+
+      if (prepSeconds !== null) {
+        const mins = Math.floor(prepSeconds / 60);
+        const secs = prepSeconds % 60;
+        toast.success(`Commande prête en ${mins}m ${secs.toString().padStart(2, '0')}s !`);
+      } else {
+        toast.success("Commande prête !");
+      }
+    } catch { 
+      toast.error("Erreur lors de la validation"); 
+    }
   };
 
   const revertOrder = async (orderId: string | number) => {
     try {
-      const { error } = await supabase.from('orders').update({ status: 'En cours' }).eq('id', orderId);
+      const { error } = await supabase
+        .from('orders')
+        .update({ 
+          status: 'En cours',
+          actual_prep_time_seconds: null,
+          prepared_at: null
+        })
+        .eq('id', orderId);
+
       if (error) throw error;
       toast.success("Commande replacée en cuisine !");
       setIsHistoryOpen(false); 
@@ -1276,10 +1379,6 @@ const KDS = () => {
     localStorage.setItem('pos_restaurant_id', cleanId);
     localStorage.setItem('admin_override_restaurant_id', cleanId);
     setActiveRestoId(cleanId);
-    fetchCatalog();
-    fetchKdsOptionsMetadata();
-    fetchTheme();
-    fetchOrders();
     setAdminUnlockCount(0); 
     setIsSettingsOpen(false);
     toast.success("Configuration mise à jour !");
@@ -1303,14 +1402,15 @@ const KDS = () => {
   };
 
   const futureScheduledCount = useMemo(() => {
-    return orders.filter(o => isActiveForKDS(o.status) && isRealScheduledOrder(o, now) && !forcedOrderIds.has(String(o.id))).length;
-  }, [orders, now, forcedOrderIds]);
+    const evalTime = new Date(minuteTick * 30000);
+    return orders.filter(o => isActiveForKDS(o.status) && isRealScheduledOrder(o, evalTime) && !forcedOrderIds.has(String(o.id))).length;
+  }, [orders, minuteTick, forcedOrderIds]);
 
-  // 🟢 TOUTES LES COMMANDES SANS FILTRAGE DESTRUCTIF
   const allDisplayOrders = useMemo(() => {
+    const evalTime = new Date(minuteTick * 30000);
     const active = orders.filter(o => {
       if (!isActiveForKDS(o.status)) return false;
-      if (isRealScheduledOrder(o, now) && !forcedOrderIds.has(String(o.id))) {
+      if (isRealScheduledOrder(o, evalTime) && !forcedOrderIds.has(String(o.id))) {
         return false;
       }
       return true;
@@ -1378,7 +1478,7 @@ const KDS = () => {
           productKdsDict
         );
 
-        const sig = `${productName}|${optionRows.map(r => r.items.map(o => `${o.isSans ? 'sans:' : ''}${o.name}`).join(',')).join('|')}`;
+        const sig = `${productName}|${optionRows.map(r => r.items.map(o => `${o.isSans ? 'sans:' : ''}${o.qty > 1 ? `${o.qty}x` : ''}${o.name}`).join(',')).join('|')}`;
         
         const existing = groupedItems.find(g => g.sig === sig);
         if (existing) {
@@ -1485,7 +1585,7 @@ const KDS = () => {
     optionGroupMapping, 
     groupOptionsInline, 
     forcedOrderIds, 
-    now, 
+    minuteTick, 
     activeLayoutMode, 
     optionGroupSortDict, 
     optionNameKdsDict
@@ -1575,35 +1675,40 @@ const KDS = () => {
 
   const prevPageHasLate = useMemo(() => {
     if (currentPage <= 1) return false;
+    const evalNow = minuteTick * 30000;
     const prevOrders = paginatedPages[currentPage - 2] || [];
-    return prevOrders.some(o => ((now.getTime() - new Date(o.created_at).getTime()) / 60000) > targetPrepMinutes);
-  }, [currentPage, paginatedPages, now, targetPrepMinutes]);
+    return prevOrders.some(o => ((evalNow - new Date(o.created_at).getTime()) / 60000) > targetPrepMinutes);
+  }, [currentPage, paginatedPages, minuteTick, targetPrepMinutes]);
 
   const nextPageHasLate = useMemo(() => {
     if (currentPage >= totalPages) return false;
+    const evalNow = minuteTick * 30000;
     const nextOrders = paginatedPages[currentPage] || [];
-    return nextOrders.some(o => ((now.getTime() - new Date(o.created_at).getTime()) / 60000) > targetPrepMinutes);
-  }, [currentPage, totalPages, paginatedPages, now, targetPrepMinutes]);
+    return nextOrders.some(o => ((evalNow - new Date(o.created_at).getTime()) / 60000) > targetPrepMinutes);
+  }, [currentPage, totalPages, paginatedPages, minuteTick, targetPrepMinutes]);
 
-  const historyOrders = orders
-    .filter(o => !isActiveForKDS(o.status))
-    .filter(o => {
-      if (!o.created_at) return false;
-      const orderTime = new Date(o.created_at).getTime();
-      return (Date.now() - orderTime) <= 24 * 60 * 60 * 1000;
-    })
-    .sort((a, b) => {
-      const timeA = new Date(a.created_at).getTime() || 0;
-      const timeB = new Date(b.created_at).getTime() || 0;
-      return timeB - timeA;
-    });
+  const historyOrders = useMemo(() => {
+    const evalNow = minuteTick * 30000;
+    return orders
+      .filter(o => !isActiveForKDS(o.status))
+      .filter(o => {
+        if (!o.created_at) return false;
+        const orderTime = new Date(o.created_at).getTime();
+        return (evalNow - orderTime) <= 24 * 60 * 60 * 1000;
+      })
+      .sort((a, b) => {
+        const timeA = new Date(a.created_at).getTime() || 0;
+        const timeB = new Date(b.created_at).getTime() || 0;
+        return timeB - timeA;
+      });
+  }, [orders, minuteTick]);
 
-  const toggleItemDone = (lineId: string) => {
+  const toggleItemDone = useCallback((lineId: string) => {
     setDoneItems(prev => ({
       ...prev,
       [lineId]: !prev[lineId]
     }));
-  };
+  }, []);
 
   const currentProductFont = PRODUCT_FONT_CONFIGS[productFontSize] || PRODUCT_FONT_CONFIGS.normal;
   const currentOptionFont = OPTION_FONT_CONFIGS[optionFontSize] || OPTION_FONT_CONFIGS.normal;
@@ -1872,6 +1977,7 @@ const KDS = () => {
                       now={now} 
                       scheduledTime={order.scheduled_time} 
                       targetPrepMinutes={targetPrepMinutes}
+                      timerMode={timerMode}
                     />
                     <div className="text-[clamp(13px,1.8vh,24px)] font-black text-slate-900 bg-white px-[0.8vw] py-[0.2vh] rounded-none shadow-sm">
                       {order.order_number || `#${order.id.toString().slice(-3)}`}
@@ -2169,6 +2275,7 @@ const KDS = () => {
                 historyOrders.map(order => {
                   const isClosed = order.status?.toLowerCase() === 'fermé' || order.status?.toLowerCase() === 'ferme' || order.status?.toLowerCase() === 'annulée';
                   const items = parseOrderDetails(order.order_details);
+                  const prepSec = order.actual_prep_time_seconds;
 
                   return (
                     <div key={order.id} className="bg-white/5 border border-white/10 p-4 flex justify-between items-center rounded-none">
@@ -2176,6 +2283,11 @@ const KDS = () => {
                         <div className="flex items-center gap-3 mb-2">
                           <span className="font-black text-lg text-white">{order.order_number || `#${order.id.toString().slice(-3)}`}</span>
                           <span className={`px-2.5 py-0.5 text-xs font-black uppercase rounded-none ${isClosed ? 'bg-white/10 text-white/50' : 'bg-emerald-500/20 text-emerald-400'}`}>{order.status}</span>
+                          {typeof prepSec === 'number' && (
+                            <span className="px-2 py-0.5 text-xs font-black bg-amber-500/20 text-amber-300 flex items-center gap-1">
+                              <Timer size={12} /> {Math.floor(prepSec / 60)}m {(prepSec % 60).toString().padStart(2, '0')}s
+                            </span>
+                          )}
                         </div>
                         <div className="text-sm text-white/60">
                           {items.filter(Boolean).map((i: any) => {
@@ -2188,7 +2300,7 @@ const KDS = () => {
                         </div>
                       </div>
                       
-                      <button onClick={() => revertOrder(order.id)} className="bg-white/10 hover:bg-amber-500 hover:text-slate-900 text-white font-black px-4 py-2 text-xs uppercase rounded-none transition-colors flex items-center gap-2">
+                      <button onClick={() => revertOrder(order.id)} className="bg-white/10 hover:bg-amber-500 hover:text-slate-900 text-white font-black px-4 py-2 text-xs uppercase rounded-none transition-colors flex items-center gap-2 cursor-pointer">
                         <RotateCcw size={16} /> Restaurer
                       </button>
                     </div>
@@ -2217,7 +2329,7 @@ const KDS = () => {
               >
                 <Settings size={24}/> Paramètres KDS
               </h2>
-              <button onClick={() => { setIsSettingsOpen(false); setAdminUnlockCount(0); }} className="text-white/50 hover:text-white p-1"><X size={24} /></button>
+              <button onClick={() => { setIsSettingsOpen(false); setAdminUnlockCount(0); }} className="text-white/50 hover:text-white p-1 cursor-pointer"><X size={24} /></button>
             </div>
 
             <div className="p-6 space-y-5 overflow-y-auto max-h-[75vh] custom-scrollbar">
@@ -2296,8 +2408,40 @@ const KDS = () => {
                 </div>
               )}
 
-              {/* SONNERIE */}
+              {/* 🟢 MODE DU CHRONOMÈTRE */}
               <div>
+                <h3 className="text-xs font-black uppercase tracking-wider text-white mb-2 flex items-center gap-2">
+                  <Timer size={16} className="text-amber-500"/> Mode du chronomètre
+                </h3>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleChangeTimerMode('countdown')}
+                    className={`py-2.5 px-3 text-xs font-black uppercase border rounded-none transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      timerMode === 'countdown'
+                        ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-md'
+                        : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
+                    }`}
+                  >
+                    <Hourglass size={16} /> Décompte ({targetPrepMinutes}:00 → 00:00)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleChangeTimerMode('elapsed')}
+                    className={`py-2.5 px-3 text-xs font-black uppercase border rounded-none transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      timerMode === 'elapsed'
+                        ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-md'
+                        : 'bg-white/5 text-white/80 border-white/10 hover:bg-white/10'
+                    }`}
+                  >
+                    <Timer size={16} /> Temps écoulé (00:00 → +)
+                  </button>
+                </div>
+              </div>
+
+              {/* SONNERIE */}
+              <div className="border-t border-white/10 pt-4">
                 <h3 className="text-xs font-black uppercase tracking-wider text-white mb-2 flex items-center gap-2">
                   <BellRing size={16} className="text-amber-500"/> Sonnerie des commandes
                 </h3>
