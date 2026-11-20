@@ -116,6 +116,19 @@ const normalizeText = (str: string) => {
     .trim();
 };
 
+/**
+ * Nom cuisine d'un produit sans perdre ce qui change la préparation :
+ * la variante (« Nuggets (6) ») et menu / seul, présents dans le nom commandé.
+ */
+const withOrderDetailsInKdsName = (kdsName: string, orderedName: string): string => {
+  let name = kdsName;
+  const variant = orderedName.match(/\(([^()]+)\)\s*$/);
+  if (variant && !name.includes(`(${variant[1]})`)) name = `${name} (${variant[1]})`;
+  if (/\bseul\b/i.test(orderedName) && !/\bseul\b/i.test(name)) name = `${name} Seul`;
+  else if (/^menu\s/i.test(orderedName) && !/^menu\s/i.test(name)) name = `Menu ${name}`;
+  return name;
+};
+
 const parseOrderDetails = (details: any): any[] => {
   if (Array.isArray(details)) return details;
   if (typeof details === 'string') {
@@ -1069,7 +1082,7 @@ const KDS = () => {
       const past24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const { data, error } = await supabase
         .from('orders')
-        .select('id, status, created_at, scheduled_time, order_number, order_type_id, order_details, customer_name, customer_phone, actual_prep_time_seconds, prepared_at') 
+        .select('id, status, created_at, scheduled_time, order_number, order_type_id, order_details, customer_name, customer_phone, actual_prep_time_seconds, prepared_at, comment') 
         .eq('restaurant_id', activeRestoId)
         .gte('created_at', past24Hours.toISOString())
         .order('created_at', { ascending: true });
@@ -1457,14 +1470,14 @@ const KDS = () => {
         const normRawName = rawProductName.toLowerCase().trim();
         const normalizedClean = normalizeText(rawProductName);
 
-        const productName = 
+        const kdsName =
           item.product?.name_kds ||
           item.name_kds ||
           productKdsDict[baseProductId] ||
           productKdsDict[productId] ||
           productKdsDict[normRawName] ||
-          productKdsDict[normalizedClean] ||
-          rawProductName;
+          productKdsDict[normalizedClean];
+        const productName = kdsName ? withOrderDetailsInKdsName(String(kdsName), rawProductName) : rawProductName;
 
         const qty = item.quantity || 1;
         
@@ -1489,6 +1502,11 @@ const KDS = () => {
       });
 
       const flatLines: any[] = [];
+      // Commentaire de la commande (caisse, app, alertes de paiement) : en tête, bien visible
+      const orderComment = String(order.comment || '').trim();
+      if (orderComment) {
+        flatLines.push({ id: `${order.id}:::comment`, isComment: true, text: orderComment });
+      }
       groupedItems.forEach((gItem: any) => {
         const itemKey = `${order.id}:::${gItem.sig}`;
         
@@ -2003,6 +2021,21 @@ const KDS = () => {
                             const isDone = !!doneItems[line.id];
                             const isChunkFirst = lineIdx === 0;
                             const isChunkLast = lineIdx === columnLines.length - 1;
+
+                            if (line.isComment) {
+                              return (
+                                <div
+                                  key={line.id}
+                                  className={`min-h-0 w-full overflow-hidden flex items-center gap-[0.5vw] px-[0.8vw] py-[0.3vh] bg-amber-300 text-slate-950 border-x border-b border-amber-500 rounded-none ${isChunkFirst ? 'border-t' : ''}`}
+                                  title={line.text}
+                                >
+                                  <span className="flex-shrink-0 text-[clamp(12px,1.4vh,18px)] leading-none" aria-hidden="true">💬</span>
+                                  <span className={`${currentOptionFont.single} font-black leading-tight line-clamp-2 break-words`}>
+                                    {line.text}
+                                  </span>
+                                </div>
+                              );
+                            }
 
                             if (line.isProduct) {
                               return (
