@@ -8,6 +8,7 @@ interface ScheduledOrdersModalProps {
   orders: any[];
   onForceSendToKitchen: (orderId: string | number) => void;
   themeColors?: { primary: string; secondary: string };
+  maxPrepMinutes?: number;
 }
 
 const parseOrderDetails = (details: any): any[] => {
@@ -30,7 +31,8 @@ export const ScheduledOrdersModal: React.FC<ScheduledOrdersModalProps> = ({
   onClose,
   orders,
   onForceSendToKitchen,
-  themeColors = { primary: '#FBBF24', secondary: '#1e293b' }
+  themeColors = { primary: '#FBBF24', secondary: '#1e293b' },
+  maxPrepMinutes = 0
 }) => {
   const [now, setNow] = useState(new Date());
 
@@ -54,7 +56,7 @@ export const ScheduledOrdersModal: React.FC<ScheduledOrdersModalProps> = ({
 
       // Si le délai est de 10-15 min, c'est une commande normale -> EXCLUE
       // On ne garde que les commandes programmées à plus de 30 min
-      return diffFromCreationMinutes > 30 && diffFromNowMinutes > 30;
+      return diffFromCreationMinutes > Math.max(30, (Number(maxPrepMinutes) || 0) + 10) && diffFromNowMinutes > 30;
     })
     .sort((a, b) => new Date(a.scheduled_time).getTime() - new Date(b.scheduled_time).getTime());
 

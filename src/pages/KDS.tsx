@@ -39,7 +39,13 @@ const ORDER_TYPE_IDS = {
 
 const SCHEDULED_THRESHOLD_MINUTES = 30;
 
-export const isRealScheduledOrder = (order: any, now: Date) => {
+// Une commande « au plus vite » est prévue au temps de préparation du restaurant
+// (jusqu'à 40 min en livraison). Elle n'est programmée que si le client a demandé
+// une heure nettement plus tardive : seuil = max(30, temps de préparation le plus long + 10).
+export const scheduledLimitMinutes = (maxPrepMinutes = 0) =>
+  Math.max(SCHEDULED_THRESHOLD_MINUTES, (Number(maxPrepMinutes) || 0) + 10);
+
+export const isRealScheduledOrder = (order: any, now: Date, maxPrepMinutes = 0) => {
   if (!order.scheduled_time) return false;
   const schedTime = new Date(order.scheduled_time).getTime();
   const createdTime = new Date(order.created_at).getTime();
@@ -48,7 +54,7 @@ export const isRealScheduledOrder = (order: any, now: Date) => {
   const diffFromCreation = (schedTime - createdTime) / 60000;
   const diffFromNow = (schedTime - now.getTime()) / 60000;
 
-  return diffFromCreation > 30 && diffFromNow > SCHEDULED_THRESHOLD_MINUTES;
+  return diffFromCreation > scheduledLimitMinutes(maxPrepMinutes) && diffFromNow > SCHEDULED_THRESHOLD_MINUTES;
 };
 
 // POLICES FLUIDES ADAPTÉES AU VIEWPORT
@@ -735,6 +741,7 @@ const KDS = () => {
 
   const [themeColors, setThemeColors] = useState({ primary: '#FBBF24', secondary: '#1e293b' });
   const [targetPrepMinutes, setTargetPrepMinutes] = useState<number>(15);
+  const [maxPrepMinutes, setMaxPrepMinutes] = useState<number>(40);
 
   const [productDict, setProductDict] = useState<Record<string, string>>({});
   const [productNameDict, setProductNameDict] = useState<Record<string, string>>({});
@@ -922,7 +929,7 @@ const KDS = () => {
     try {
       const { data, error } = await supabase
         .from('restaurants')
-        .select('theme_primary, theme_secondary, prep_time_dine_in')
+        .select('theme_primary, theme_secondary, prep_time_dine_in, prep_time_takeaway, prep_time_delivery')
         .eq('id', activeRestoId)
         .single();
         
@@ -934,6 +941,9 @@ const KDS = () => {
         if (data.prep_time_dine_in !== undefined && data.prep_time_dine_in !== null) {
           setTargetPrepMinutes(Number(data.prep_time_dine_in) || 15);
         }
+        const preps = [data.prep_time_dine_in, data.prep_time_takeaway, data.prep_time_delivery]
+          .map(v => Number(v)).filter(v => Number.isFinite(v) && v > 0);
+        setMaxPrepMinutes(preps.length ? Math.max(...preps) : 40);
       }
     } catch (e) {
       console.error("Erreur chargement thème/prep_time", e);
@@ -1416,14 +1426,14 @@ const KDS = () => {
 
   const futureScheduledCount = useMemo(() => {
     const evalTime = new Date(minuteTick * 30000);
-    return orders.filter(o => isActiveForKDS(o.status) && isRealScheduledOrder(o, evalTime) && !forcedOrderIds.has(String(o.id))).length;
-  }, [orders, minuteTick, forcedOrderIds]);
+    return orders.filter(o => isActiveForKDS(o.status) && isRealScheduledOrder(o, evalTime, maxPrepMinutes) && !forcedOrderIds.has(String(o.id))).length;
+  }, [orders, minuteTick, forcedOrderIds, maxPrepMinutes]);
 
   const allDisplayOrders = useMemo(() => {
     const evalTime = new Date(minuteTick * 30000);
     const active = orders.filter(o => {
       if (!isActiveForKDS(o.status)) return false;
-      if (isRealScheduledOrder(o, evalTime) && !forcedOrderIds.has(String(o.id))) {
+      if (isRealScheduledOrder(o, evalTime, maxPrepMinutes) && !forcedOrderIds.has(String(o.id))) {
         return false;
       }
       return true;
@@ -1607,7 +1617,7 @@ const KDS = () => {
     activeLayoutMode, 
     optionGroupSortDict, 
     optionNameKdsDict
-  ]);
+  , maxPrepMinutes]);
 
   const newOrdersAlertList = useMemo(() => {
     return allDisplayOrders.filter(o => o.status?.trim().toLowerCase() === 'nouvelle');
@@ -2290,6 +2300,7 @@ const KDS = () => {
         orders={orders.filter(o => isActiveForKDS(o.status))}
         onForceSendToKitchen={handleForceSendToKitchen}
         themeColors={themeColors}
+        maxPrepMinutes={maxPrepMinutes}
       />
 
       {/* MODAL HISTORIQUE */}
