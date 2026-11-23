@@ -26,7 +26,8 @@ import {
   QrCode, 
   KeyRound, 
   Unlink,
-  Hourglass
+  Hourglass,
+  Ban
 } from 'lucide-react';
 import { getFormattedOrderOptions, fetchOptionGroupMapping } from '@/lib/orderFormatter';
 import { ScheduledOrdersModal } from '@/components/ScheduledOrdersModal';
@@ -286,6 +287,14 @@ const extractOptionLinesForKDS = (
 
   return resultRows;
 };
+
+const isCancelledStatus = (status: string) => {
+  const s = status?.trim().toLowerCase() || '';
+  return s === 'annulée' || s === 'annulee';
+};
+
+// Durée pendant laquelle une commande annulée reste affichée (bandeau rouge) avant de disparaître
+const CANCEL_NOTICE_MS = 15000;
 
 const isActiveForKDS = (status: string) => {
   const s = status?.trim().toLowerCase() || '';
@@ -1106,6 +1115,46 @@ const KDS = () => {
     }
   }, [activeRestoId]);
 
+  // ── Commandes annulées pendant qu'elles sont à l'écran : bandeau rouge temporaire ──
+  const [cancelNotices, setCancelNotices] = useState<Record<string, boolean>>({});
+  const prevStatusRef = useRef<Map<string, string> | null>(null);
+
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    const next = new Map(orders.map(o => [String(o.id), o.status || '']));
+    prevStatusRef.current = next;
+    if (!prev) return; // premier chargement : on n'alerte pas sur les anciennes annulations
+
+    const justCancelled = orders
+      .filter(o => isCancelledStatus(o.status) && prev.has(String(o.id)) && isActiveForKDS(prev.get(String(o.id)) || ''))
+      .map(o => String(o.id));
+    if (justCancelled.length === 0) return;
+
+    setCancelNotices(cur => {
+      const upd = { ...cur };
+      justCancelled.forEach(id => { upd[id] = true; });
+      return upd;
+    });
+    justCancelled.forEach(id => {
+      setTimeout(() => {
+        setCancelNotices(cur => {
+          if (!cur[id]) return cur;
+          const upd = { ...cur };
+          delete upd[id];
+          return upd;
+        });
+      }, CANCEL_NOTICE_MS);
+    });
+  }, [orders]);
+
+  const dismissCancelNotice = useCallback((orderId: string | number) => {
+    setCancelNotices(cur => {
+      const upd = { ...cur };
+      delete upd[String(orderId)];
+      return upd;
+    });
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
     const loadMapping = async () => {
@@ -1432,7 +1481,7 @@ const KDS = () => {
   const allDisplayOrders = useMemo(() => {
     const evalTime = new Date(minuteTick * 30000);
     const active = orders.filter(o => {
-      if (!isActiveForKDS(o.status)) return false;
+      if (!isActiveForKDS(o.status) && !cancelNotices[String(o.id)]) return false;
       if (isRealScheduledOrder(o, evalTime, maxPrepMinutes) && !forcedOrderIds.has(String(o.id))) {
         return false;
       }
@@ -1617,7 +1666,7 @@ const KDS = () => {
     activeLayoutMode, 
     optionGroupSortDict, 
     optionNameKdsDict
-  , maxPrepMinutes]);
+  , cancelNotices, maxPrepMinutes]);
 
   const newOrdersAlertList = useMemo(() => {
     return allDisplayOrders.filter(o => o.status?.trim().toLowerCase() === 'nouvelle');
@@ -1775,9 +1824,19 @@ const KDS = () => {
       {showAudioUnlock && !!activeRestoId && (
         <button 
           onClick={unlockAudio} 
-          className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-[2vw] py-[1.2vh] rounded-none font-black animate-bounce shadow-2xl z-50 flex items-center gap-3 border-2 border-white cursor-pointer text-[clamp(13px,1.5vh,20px)]"
+          aria-label="Activer le son des nouvelles commandes"
+          className="absolute top-[1.6vh] left-1/2 -translate-x-1/2 z-50 flex items-center gap-[1vw] pl-[0.6vh] pr-[1.6vw] py-[0.6vh] rounded-full bg-slate-900/90 backdrop-blur-md text-white border border-white/15 shadow-[0_10px_40px_rgba(0,0,0,0.45)] hover:bg-slate-800/95 active:scale-[0.97] transition cursor-pointer"
         >
-          <VolumeX className="w-[2.2vh] h-[2.2vh]" /> CLIQUEZ ICI POUR ACTIVER LE SON
+          <span className="relative flex items-center justify-center w-[5vh] h-[5vh] min-w-[40px] min-h-[40px]">
+            <span className="absolute inset-0 rounded-full bg-amber-400/40 animate-ping" />
+            <span className="relative flex items-center justify-center w-full h-full rounded-full bg-amber-400 text-slate-950">
+              <VolumeX className="w-[2.4vh] h-[2.4vh] min-w-[18px] min-h-[18px]" strokeWidth={2.5} />
+            </span>
+          </span>
+          <span className="flex flex-col items-start leading-tight">
+            <span className="font-black tracking-wide text-[clamp(13px,1.7vh,22px)]">Activer le son</span>
+            <span className="font-semibold text-white/60 text-[clamp(10px,1.2vh,15px)]">Toucher pour entendre les nouvelles commandes</span>
+          </span>
         </button>
       )}
 
@@ -1972,6 +2031,7 @@ const KDS = () => {
             {currentOrders.map((order) => {
               const status = order.status?.trim().toLowerCase() || '';
               const isNewOrder = status === 'nouvelle';
+              const isCancelled = isCancelledStatus(order.status);
 
               let headerBgClass = 'bg-gray-600'; 
               if (order.order_type_id === ORDER_TYPE_IDS.SUR_PLACE) {
@@ -1993,8 +2053,20 @@ const KDS = () => {
                     gridColumn: `${order.gridColStart} / span ${order.colSpan}`,
                     gridRow: `${order.gridRowStart} / span ${order.rowSpan}`
                   }}
-                  className={`bg-slate-100 flex flex-col overflow-hidden rounded-none h-full ${cardBorderClass}`}
+                  className={`bg-slate-100 flex flex-col overflow-hidden rounded-none h-full relative ${isCancelled ? 'border-[3px] border-red-600 z-30' : cardBorderClass}`}
                 >
+                  {isCancelled && (
+                    <button
+                      type="button"
+                      onClick={() => dismissCancelNotice(order.id)}
+                      className="absolute inset-0 z-40 bg-red-600/90 text-white flex flex-col items-center justify-center gap-[1vh] cursor-pointer"
+                      aria-label="Commande annulée, toucher pour masquer"
+                    >
+                      <Ban className="w-[7vh] h-[7vh] animate-pulse" strokeWidth={2.5} />
+                      <span className="text-[3.2vh] font-black uppercase tracking-widest">Annulée</span>
+                      <span className="text-[2.4vh] font-black">{order.order_number || `#${String(order.id).slice(-3)}`}</span>
+                    </button>
+                  )}
                   <div className={`${headerBgClass} px-[0.8vw] py-[0.8vh] flex justify-between items-center border-b border-black/30 flex-shrink-0 z-10`}>
                     <div className="flex items-center gap-[0.5vw]">
                       {isNewOrder && <BellRing className="w-[1.8vh] h-[1.8vh] text-white animate-bounce" />}
@@ -2317,7 +2389,8 @@ const KDS = () => {
                 <div className="text-center py-8 text-white/40 text-sm">Aucune commande récente</div>
               ) : (
                 historyOrders.map(order => {
-                  const isClosed = order.status?.toLowerCase() === 'fermé' || order.status?.toLowerCase() === 'ferme' || order.status?.toLowerCase() === 'annulée';
+                  const isCancelledOrder = isCancelledStatus(order.status);
+                  const isClosed = order.status?.toLowerCase() === 'fermé' || order.status?.toLowerCase() === 'ferme' || isCancelledOrder;
                   const items = parseOrderDetails(order.order_details);
                   const prepSec = order.actual_prep_time_seconds;
 
@@ -2326,7 +2399,7 @@ const KDS = () => {
                       <div>
                         <div className="flex items-center gap-3 mb-2">
                           <span className="font-black text-lg text-white">{order.order_number || `#${order.id.toString().slice(-3)}`}</span>
-                          <span className={`px-2.5 py-0.5 text-xs font-black uppercase rounded-none ${isClosed ? 'bg-white/10 text-white/50' : 'bg-emerald-500/20 text-emerald-400'}`}>{order.status}</span>
+                          <span className={`px-2.5 py-0.5 text-xs font-black uppercase rounded-none flex items-center gap-1 ${isCancelledOrder ? 'bg-red-600 text-white' : isClosed ? 'bg-white/10 text-white/50' : 'bg-emerald-500/20 text-emerald-400'}`}>{isCancelledOrder && <Ban size={12} />}{order.status}</span>
                           {typeof prepSec === 'number' && (
                             <span className="px-2 py-0.5 text-xs font-black bg-amber-500/20 text-amber-300 flex items-center gap-1">
                               <Timer size={12} /> {Math.floor(prepSec / 60)}m {(prepSec % 60).toString().padStart(2, '0')}s
@@ -2344,9 +2417,12 @@ const KDS = () => {
                         </div>
                       </div>
                       
-                      <button onClick={() => revertOrder(order.id)} className="bg-white/10 hover:bg-amber-500 hover:text-slate-900 text-white font-black px-4 py-2 text-xs uppercase rounded-none transition-colors flex items-center gap-2 cursor-pointer">
-                        <RotateCcw size={16} /> Restaurer
-                      </button>
+                      {/* Une commande annulée en caisse ne se restaure pas depuis la cuisine */}
+                      {!isCancelledOrder && (
+                        <button onClick={() => revertOrder(order.id)} className="bg-white/10 hover:bg-amber-500 hover:text-slate-900 text-white font-black px-4 py-2 text-xs uppercase rounded-none transition-colors flex items-center gap-2 cursor-pointer">
+                          <RotateCcw size={16} /> Restaurer
+                        </button>
+                      )}
                     </div>
                   );
                 })
