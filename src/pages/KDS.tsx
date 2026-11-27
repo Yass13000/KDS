@@ -27,7 +27,8 @@ import {
   KeyRound, 
   Unlink,
   Hourglass,
-  Ban
+  Ban,
+  Eye
 } from 'lucide-react';
 import { getFormattedOrderOptions, fetchOptionGroupMapping } from '@/lib/orderFormatter';
 import { ScheduledOrdersModal } from '@/components/ScheduledOrdersModal';
@@ -646,6 +647,8 @@ const KDS = () => {
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  // Commande de l'historique ouverte en lecture seule (son statut ne change pas)
+  const [viewOrderId, setViewOrderId] = useState<string | number | null>(null);
   const [isScheduledModalOpen, setIsScheduledModalOpen] = useState(false);
 
   const [pairingCode, setPairingCode] = useState<string>(() => generateRandomPairingCode());
@@ -1674,6 +1677,30 @@ const KDS = () => {
 
   const hasNewOrders = newOrdersAlertList.length > 0;
 
+  // Petit bip unique quand une commande apparaît directement « En cours »
+  // (réglage « Statut à l'arrivée » de la caisse). Les commandes « Nouvelle »
+  // gardent la sonnerie en boucle ci-dessous, inchangée.
+  const seenOrderIdsRef = useRef<{ resto: string | null; ids: Set<string> } | null>(null);
+  useEffect(() => {
+    if (isLoading) return;
+    const resto = activeRestoId || null;
+    if (!seenOrderIdsRef.current || seenOrderIdsRef.current.resto !== resto) {
+      // Premier chargement (ou autre restaurant) : on mémorise sans sonner
+      seenOrderIdsRef.current = { resto, ids: new Set(allDisplayOrders.map(o => String(o.id))) };
+      return;
+    }
+    const seen = seenOrderIdsRef.current.ids;
+    let arrivedInProgress = false;
+    for (const o of allDisplayOrders) {
+      const id = String(o.id);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const s = o.status?.trim().toLowerCase() || '';
+      if (s === 'en cours' || s.includes('prépar') || s.includes('prepar')) arrivedInProgress = true;
+    }
+    if (arrivedInProgress && audioEnabled && !isLoopingSoundRef.current) playConfiguredAlertSound();
+  }, [allDisplayOrders, isLoading, activeRestoId, audioEnabled, playConfiguredAlertSound]);
+
   useEffect(() => {
     if (hasNewOrders && audioEnabled) {
       startLoopingSound();
@@ -2417,12 +2444,17 @@ const KDS = () => {
                         </div>
                       </div>
                       
+                      <div className="flex items-center gap-2 shrink-0">
+                      <button onClick={() => setViewOrderId(order.id)} className="bg-white/10 hover:bg-sky-500 hover:text-slate-900 text-white font-black px-4 py-2 text-xs uppercase rounded-none transition-colors flex items-center gap-2 cursor-pointer" title="Voir la commande sans la remettre en cours">
+                        <Eye size={16} /> Voir
+                      </button>
                       {/* Une commande annulée en caisse ne se restaure pas depuis la cuisine */}
                       {!isCancelledOrder && (
                         <button onClick={() => revertOrder(order.id)} className="bg-white/10 hover:bg-amber-500 hover:text-slate-900 text-white font-black px-4 py-2 text-xs uppercase rounded-none transition-colors flex items-center gap-2 cursor-pointer">
                           <RotateCcw size={16} /> Restaurer
                         </button>
                       )}
+                      </div>
                     </div>
                   );
                 })
@@ -2431,6 +2463,76 @@ const KDS = () => {
           </div>
         </div>
       )}
+
+      {/* VISUALISATION D'UNE COMMANDE DE L'HISTORIQUE (lecture seule) */}
+      {viewOrderId !== null && (() => {
+        const order = orders.find(o => String(o.id) === String(viewOrderId));
+        if (!order) return null;
+        const items = parseOrderDetails(order.order_details).filter(Boolean);
+        const isCancelledOrder = isCancelledStatus(order.status);
+        const typeBg = order.order_type_id === ORDER_TYPE_IDS.SUR_PLACE ? 'bg-[#E65100]'
+          : order.order_type_id === ORDER_TYPE_IDS.EMPORTER ? 'bg-[#A0612D]'
+          : order.order_type_id === ORDER_TYPE_IDS.LIVRAISON ? 'bg-[#1976D2]' : 'bg-gray-600';
+        const created = order.created_at ? new Date(order.created_at) : null;
+        const prepSec = order.actual_prep_time_seconds;
+        const comment = String(order.comment || '').trim();
+        return (
+          <div className="fixed inset-0 z-[60] bg-black/85 flex items-center justify-center p-4" onClick={() => setViewOrderId(null)}>
+            <div className="bg-slate-50 w-full max-w-xl flex flex-col max-h-[88vh] rounded-none border border-slate-900" onClick={e => e.stopPropagation()}>
+              <div className={`${typeBg} text-white px-4 py-3 flex items-center justify-between gap-3`}>
+                <div className="flex items-center gap-3 flex-wrap min-w-0">
+                  <span className="font-black text-2xl leading-none">{order.order_number || `#${order.id.toString().slice(-3)}`}</span>
+                  <span className={`px-2.5 py-0.5 text-xs font-black uppercase flex items-center gap-1 ${isCancelledOrder ? 'bg-red-600' : 'bg-black/30'}`}>{isCancelledOrder && <Ban size={12} />}{order.status}</span>
+                  {created && <span className="text-sm font-bold opacity-90 flex items-center gap-1"><Clock size={14} /> {created.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>}
+                  {typeof prepSec === 'number' && (
+                    <span className="text-sm font-bold opacity-90 flex items-center gap-1"><Timer size={14} /> {Math.floor(prepSec / 60)}m {(prepSec % 60).toString().padStart(2, '0')}s</span>
+                  )}
+                </div>
+                <button onClick={() => setViewOrderId(null)} className="w-11 h-11 flex items-center justify-center hover:bg-white/20 shrink-0" aria-label="Fermer"><X size={24} /></button>
+              </div>
+              {order.customer_name && (
+                <div className="px-4 py-2 bg-slate-200 text-slate-800 text-sm font-black uppercase">{order.customer_name}</div>
+              )}
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+                {comment && (
+                  <div className="flex items-start gap-2 px-3 py-2 bg-amber-300 text-slate-950 border border-amber-500 font-black text-sm break-words">
+                    <span aria-hidden="true">💬</span><span>{comment}</span>
+                  </div>
+                )}
+                {items.length === 0 && <div className="text-center py-8 text-slate-400 text-sm">Aucun article</div>}
+                {items.map((item: any, idx: number) => {
+                  const rawName = item.product?.name || item.name || 'Article';
+                  const pId = (item.product?.id || item.id || item.product_id || '').toString().trim();
+                  const basePId = pId.includes('-') ? pId.split('-')[0] : pId;
+                  const kdsName = item.product?.name_kds || item.name_kds || productKdsDict[basePId] || productKdsDict[pId] || productKdsDict[rawName.toLowerCase().trim()] || productKdsDict[normalizeText(rawName)];
+                  const name = kdsName ? withOrderDetailsInKdsName(String(kdsName), rawName) : rawName;
+                  const rows = extractOptionLinesForKDS(item, hiddenOptionNames, optionGroupMapping, groupOptionsInline, optionGroupSortDict, optionNameKdsDict, productKdsDict);
+                  return (
+                    <div key={idx} className="bg-white border border-slate-300">
+                      <div className="flex items-start gap-2 px-3 py-2 bg-slate-900 text-white">
+                        <span className="font-black text-lg leading-tight">{item.quantity || 1}x</span>
+                        <span className="font-black text-lg leading-tight uppercase break-words min-w-0">{name}</span>
+                      </div>
+                      {rows.length > 0 && (
+                        <div className="px-3 py-1.5 space-y-1">
+                          {rows.map((row: any, rIdx: number) => (
+                            <div key={rIdx} className={`text-sm font-bold break-words ${row.isSans ? 'text-red-600' : 'text-slate-700'}`}>
+                              {row.items.map((o: any) => `${row.isSans ? 'SANS ' : ''}${o.qty > 1 ? `${o.qty}x ` : ''}${o.name}`).join(' • ')}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="p-3 border-t border-slate-200 flex justify-end">
+                <button onClick={() => setViewOrderId(null)} className="h-12 px-6 bg-slate-900 hover:bg-slate-700 text-white font-black uppercase text-sm rounded-none cursor-pointer">Fermer</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* MODAL PARAMÈTRES ÉPURÉ */}
       {isSettingsOpen && (
